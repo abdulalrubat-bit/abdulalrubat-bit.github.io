@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fateful Games — indie studio, Victoria, Australia</title>
+<meta name="description" content="Fateful Games is a solo game studio in Victoria, Australia, making games grounded in real work. Warehouse Empire and Ultimate Survivor on Google Play.">
+<meta property="og:title" content="Fateful Games">
+<meta property="og:description" content="A solo studio in Victoria, Australia, making games about work people actually do.">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --bg:#232529; --panel:#2c2f34; --line:#474c53;
+    --ink:#edeff1; --dim:#969ca4; --steel:#79818b;
+    --hivis:#f2620f; --hivis-d:#a83d00; --hazard:#f0c000;
+    --font-cond:'Roboto Condensed','Noto Sans Condensed','Liberation Sans Narrow','Arial Narrow',sans-serif;
+    --font-mono:'Roboto Mono','Noto Sans Mono','DejaVu Sans Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:var(--font-mono); font-size:14px; line-height:1.7;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");}
+  .wrap{max-width:680px; margin:0 auto; padding:0 20px 72px;}
+
+  /* hazard stripe under the header, same motif as the games */
+  header{padding:44px 0 20px; border-bottom:3px solid var(--hivis); position:relative;}
+  header::after{content:""; position:absolute; left:0; right:0; bottom:-9px; height:6px;
+    background:repeating-linear-gradient(45deg,var(--hazard) 0 8px,#232529 8px 16px);
+    opacity:.5;}
+  .brand{font-family:var(--font-cond); font-weight:800; font-size:38px;
+    letter-spacing:5px; text-transform:uppercase; margin:0; line-height:1;}
+  .brand span{color:var(--hivis);}
+  .tag{font-family:var(--font-cond); font-size:11px; letter-spacing:4px;
+    text-transform:uppercase; color:var(--steel); margin:10px 0 0;}
+
+  h2{font-family:var(--font-cond); font-weight:800; font-size:20px; letter-spacing:1.2px;
+    text-transform:uppercase; margin:42px 0 12px;
+    border-left:3px solid var(--hivis); padding-left:10px;}
+  p{margin:0 0 15px; color:#d5d9dd;}
+  a{color:var(--hazard); text-decoration:underline; text-underline-offset:2px;
+    overflow-wrap:break-word;}
+
+  .lead{font-size:15px; color:var(--ink); border-left:3px solid var(--hazard);
+    padding-left:14px; margin:26px 0 0;}
+
+  .game{background:var(--panel); border:1px solid var(--line);
+    border-left:3px solid var(--hivis); border-radius:4px;
+    padding:18px 18px 16px; margin:0 0 14px;}
+  .game h3{font-family:var(--font-cond); font-weight:800; font-size:19px;
+    letter-spacing:.8px; text-transform:uppercase; margin:0 0 2px;}
+  .game .meta{font-size:10px; letter-spacing:1.4px; text-transform:uppercase;
+    color:var(--steel); margin:0 0 10px;}
+  .game p{margin:0 0 14px; font-size:13px;}
+  .btn{display:inline-block; font-family:var(--font-cond); font-weight:700;
+    font-size:12px; letter-spacing:1.6px; text-transform:uppercase;
+    background:var(--hivis); color:#20130a; text-decoration:none;
+    padding:9px 16px; border-radius:3px; box-shadow:0 3px 0 var(--hivis-d);}
+  .btn:hover{background:#ff7420;}
+
+  ul{margin:0 0 15px; padding-left:20px; color:#d5d9dd;}
+  li{margin-bottom:7px;}
+  strong{color:var(--ink);}
+
+  footer{margin-top:50px; padding-top:20px; border-top:1px solid var(--line);
+    font-size:11px; color:var(--steel);}
+  footer a{color:var(--steel);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1 class="brand">Fateful<span>&nbsp;Games</span></h1>
+    <p class="tag">Victoria &nbsp;·&nbsp; Australia</p>
+  </header>
+
+  <p class="lead">A one-person studio making games about work people actually do.</p>
+
+  <h2>About</h2>
+
+  <p>Before making games I spent years in warehousing and logistics — pick and
+  pack, receiving, dispatch, forklifts, inventory systems. That experience runs
+  through the work rather than sitting on top of it.</p>
+
+  <p>Everything here is built small and self-contained: hand-written, no engine
+  where none is needed, fully playable offline, with no accounts, no sign-in and
+  no data collection. Where there is advertising, it is opt-in only — you choose
+  to watch something in exchange for a benefit, and the game is complete without
+  ever doing so.</p>
+
+  <h2>Games</h2>
+
+  <div class="game">
+    <h3>Warehouse Empire</h3>
+    <p class="meta">Idle logistics &nbsp;·&nbsp; Android &nbsp;·&nbsp; Free</p>
+    <p>Start on the floor picking orders by hand and build up to a fully
+    automated distribution empire. Eight equipment tiers unlock in the order you
+    would actually meet them — hand picking, pallet trolley, counterbalance
+    forklift, reach truck, conveyor line, sorting robot, automated crane,
+    distribution hub. Hire managers, fill contracts, and climb the career ladder.
+    Keeps earning while you are away.</p>
+    <a class="btn" href="https://play.google.com/store/apps/details?id=com.abdulgames.warehouseempire">Google Play</a>
+  </div>
+
+  <div class="game">
+    <h3>Ultimate Survivor</h3>
+    <p class="meta">Arena survival &nbsp;·&nbsp; Android &nbsp;·&nbsp; Free</p>
+    <p>Hold out against escalating waves in a top-down arena shooter. Build a
+    loadout from cards between rounds and push as deep as the difficulty curve
+    lets you.</p>
+    <a class="btn" href="https://play.google.com/store/apps/details?id=com.fatefulgames.ultimatesurvivor">Google Play</a>
+  </div>
+
+  <h2>How things are built</h2>
+
+  <ul>
+    <li>Hand-written, no engine unless one earns its place</li>
+    <li>Offline first — no accounts, no sign-in, no servers</li>
+    <li>No data collection beyond what an opt-in advertisement requires</li>
+    <li>Balance verified by simulation, not guesswork</li>
+  </ul>
+
+  <h2>Contact</h2>
+
+  <p>Enquiries: <a href="mailto:YOUR_EMAIL_HERE">YOUR_EMAIL_HERE</a></p>
+
+  <p><a href="https://abdulalrubat-bit.github.io/PRIVACY/">Privacy policy</a></p>
+
+  <footer>
+    © 2026 Fateful Games. Made in Victoria, Australia.
+  </footer>
+
+</div>
+</body>
+</html>

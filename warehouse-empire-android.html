@@ -439,7 +439,12 @@
     var Prefs = window.Capacitor.Plugins.Preferences;
     window.storage = {
       get: function(k) { return Prefs.get({ key: k }); },
-      set: function(k, v) { return Prefs.set({ key: k, value: v }); }
+      set: function(k, v) { return Prefs.set({ key: k, value: v }); },
+      remove: function(k) {
+        // Clear the legacy localStorage copy too, in case an earlier migration never completed.
+        try { localStorage.removeItem(k); } catch(e) {}
+        return Prefs.remove({ key: k });
+      }
     };
     try {
       var legacyData = localStorage.getItem("warehouse-empire-save");
@@ -458,6 +463,10 @@
       set: function(k, v){
         try { localStorage.setItem(k, v); return Promise.resolve(); }
         catch(e){ return Promise.reject(e); }
+      },
+      remove: function(k){
+        try { localStorage.removeItem(k); return Promise.resolve(); }
+        catch(e){ return Promise.reject(e); }
       }
     };
   }
@@ -466,6 +475,7 @@
   var COST_GROWTH = 1.15;
   var OFFLINE_CAP_HOURS = 8;
   var renderActive = true;
+  var wiping = false;
 
   var haptic = function(type) {
       if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics) {
@@ -666,6 +676,32 @@
   function boostActive(){ return Date.now() < boostUntil; }
   function incidentActive(){ return Date.now() < incidentSpeedUntil; }
 
+  // Ambient rush orders. They turn up on their own; Radio Dispatch makes them far more frequent.
+  // Kept shorter than the paid rushes (Call a Rush 30s, Overtime Shift 90s) so those stay worthwhile.
+  var RUSH_GAP = { base: [480000, 840000], radio: [120000, 240000] };
+  var RUSH_DURATION = 20000;
+  var nextRushAt = 0;
+
+  function tickAmbientRush(){
+    var now = Date.now();
+    var gap = state.perks.radio ? RUSH_GAP.radio : RUSH_GAP.base;
+
+    // Covers the first schedule, and pulls an already-queued wait forward the moment Radio is bought.
+    if (!nextRushAt || nextRushAt > now + gap[1]){
+      nextRushAt = now + gap[0] + Math.random() * (gap[1] - gap[0]);
+      return;
+    }
+    if (now < nextRushAt) return;
+
+    // Don't burn an ambient rush on top of a longer boost the player already paid for.
+    if (boostActive()){ nextRushAt = boostUntil + 1000; return; }
+
+    boostUntil = now + RUSH_DURATION;
+    nextRushAt = now + gap[0] + Math.random() * (gap[1] - gap[0]);
+    sfx("upgrade");
+    showToast("Rush order on the dock! <b>×8 output for " + (RUSH_DURATION / 1000) + "s</b>.");
+  }
+
   function flowEfficiency(){
     var units = 0; GENS.forEach(function(g){ units+=(state.owned[g.id]||0); });
     if (units === 0) return 1.0;
@@ -674,7 +710,7 @@
 
   function grossRate(){
     var r = 0; GENS.forEach(function(g){ r += genRate(g); });
-    return r * currentSite().out * getSku().outMult * upMult("all") * prestigeMult() * (1 + rankIndex() * 0.03) * (boostActive() ? 8 : 1) * (incidentActive() ? 1.5 : 1) * flowEfficiency();
+    return r * currentSite().out * getSku().outMult * upMult("all") * (state.perks.lean ? 1.10 : 1) * prestigeMult() * (1 + rankIndex() * 0.03) * (boostActive() ? 8 : 1) * (incidentActive() ? 1.5 : 1) * flowEfficiency();
   }
 
   function wageBill(){
@@ -702,7 +738,7 @@
 
   function tapValue(){
       var basePassiveVal = (totalRate() * 0.05) / Math.sqrt(Math.max(1, comboMult()));
-      return (1 + basePassiveVal) * upMult("tap") * currentSite().tap * getSku().tapMult * (Date.now() < tapBoostUntil ? 4 : 1) * comboMult();
+      return (1 + basePassiveVal) * upMult("tap") * (state.perks.gloves ? 1.25 : 1) * currentSite().tap * getSku().tapMult * (Date.now() < tapBoostUntil ? 4 : 1) * comboMult();
   }
 
   function costOf(g, qty){
@@ -717,7 +753,7 @@
   function pendingRep(){ return Math.max(0, repEarnedByLifetime() - state.rep); }
   function repWithFavour(n){ return Math.max(n + 1, Math.floor(n * 1.25)); }
 
-  function saveGame(){ state.lastSeen = Date.now(); window.storage.set(SAVE_KEY, JSON.stringify(state)); }
+  function saveGame(){ if (wiping) return; state.lastSeen = Date.now(); window.storage.set(SAVE_KEY, JSON.stringify(state)); }
 
   function loadGame(){
     return window.storage.get(SAVE_KEY).then(function(res){
@@ -745,8 +781,11 @@
       });
       document.getElementById("btnConfirmWipe").addEventListener("click", function(){
         if (document.getElementById("wipeInput").value === "WIPE"){
-          localStorage.removeItem(SAVE_KEY);
-          location.reload();
+          // Stop the autosave/ticker from writing the live state back out before the reload lands.
+          wiping = true;
+          var reload = function(){ location.reload(); };
+          try { window.storage.remove(SAVE_KEY).then(reload, reload); }
+          catch(e){ reload(); }
         } else {
           showToast("Type WIPE to confirm.");
         }
@@ -1623,6 +1662,7 @@
   var last = Date.now();
   setInterval(function(){
     var now = Date.now(), dt = Math.min(1.0, (now-last)/1000); last = now;
+    tickAmbientRush();
     var earned = totalRate() * dt;
     state.money += earned; state.total += earned; state.lifetime += earned;
     sessionEarned += earned;

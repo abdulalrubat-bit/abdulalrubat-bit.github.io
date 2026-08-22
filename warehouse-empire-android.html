@@ -865,12 +865,14 @@
 
           newDouble.addEventListener("click", function(){
             newDouble.disabled = true;
-            Ads.show(function(){
+            Ads.show("offline", function(){
               var doubled = earned * 2;
               state.money += doubled; state.total += doubled; state.lifetime += doubled;
               document.getElementById("modalOffline").hidden = true;
               sfx("upgrade"); showToast("Welcome back! Claimed <b>" + money(doubled) + "</b> (2× Bonus).");
               render(); saveGame(); showPendingDaily();
+            }, function(){
+              newDouble.disabled = false;   // ad failed: let them retry or claim standard
             });
           });
         }
@@ -880,17 +882,75 @@
     }).catch(function(e){ console.error(e); });
   }
 
+  // ==========================================
+  // REWARDED ADS (AdMob via @capacitor-community/admob)
+  // ==========================================
+  // One rewarded ad unit per placement. Create each in the AdMob console under this app
+  // and paste the id here. An empty id falls back to granting the reward directly, so an
+  // unfilled placement still works -- it just earns nothing.
+  var AD_UNITS = {
+    rush:    "ca-app-pub-5195464450607116/7630718166",  // Overtime Shift  -- rush x8, 90s
+    tap:     "",                                        // Double Payout   -- taps x4, 60s
+    reroll:  "",                                        // Reroll contract -- new job, +50% progress
+    favour:  "",                                        // Call in a favour -- +25% REP, +10 pallets
+    offline: ""                                         // Claim Double    -- 2x offline earnings
+  };
+
+  // Serve Google's test ads while developing. Shipping this as true earns nothing;
+  // shipping real ads to your own device without it risks an AdMob policy strike.
+  var AD_TESTING = false;
+
   var Ads = (function(){
-    var plugin = null;
-    function init(){ preload(); }
-    function preload(){ }
-    function show(onReward){ onReward(); return true; }
-    return { init:init, preload:preload, show:show };
+    var plugin = null, ready = false, inFlight = false;
+
+    function init(){
+      var P = window.Capacitor && window.Capacitor.Plugins;
+      plugin = (P && P.AdMob) || null;
+      if (!plugin) return;                   // browser build -- show() falls back to a direct grant
+      plugin.initialize({ initializeForTesting: AD_TESTING })
+        .then(function(){ ready = true; })
+        .catch(function(e){ console.error("AdMob init failed", e); });
+    }
+
+    // onReward fires only when the ad is genuinely earned. onFail lets the caller undo
+    // any UI it disabled up front.
+    function show(placement, onReward, onFail){
+      var unit = AD_UNITS[placement];
+      function fail(msg){
+        inFlight = false;
+        if (msg) showToast(msg);
+        if (onFail) onFail();
+      }
+
+      // No plugin, not initialised, or this placement has no unit yet.
+      if (!plugin || !ready || !unit){ onReward(); return true; }
+      if (inFlight){ return false; }
+      inFlight = true;
+      showToast("Loading ad\u2026");
+
+      plugin.prepareRewardVideoAd({ adId: unit, isTesting: AD_TESTING })
+        .then(function(){ return plugin.showRewardVideoAd(); })
+        .then(function(reward){
+          inFlight = false;
+          // The plugin resolves with a reward item only if the video was watched through.
+          if (reward) onReward();
+          else fail("Ad closed early \u2014 no reward.");
+        })
+        .catch(function(e){
+          // No fill, no network, or a load error. The reward is deliberately NOT granted:
+          // granting on failure would make airplane mode the fastest way to farm rewards.
+          console.error("rewarded ad failed", e);
+          fail("No ad available right now \u2014 try again shortly.");
+        });
+      return true;
+    }
+
+    return { init:init, show:show };
   })();
 
   // Reward buttons had no cooldown at all -- the unused `if (rush.disabled) return;`
-  // guard shows one was intended. Ads.show() is a stub that grants instantly, so without
-  // this every reward was unlimited and spammable.
+  // guard shows one was intended. The cooldown starts inside the reward callback, so a
+  // failed or skipped ad does not burn it.
   var AD_COOLDOWN = { rushAdBtn: 180000, dblAdBtn: 180000, rerollBtn: 120000 };
   var adReadyAt = {};
   var adSubText = {};
@@ -914,8 +974,8 @@
     var rush = document.getElementById("rushAdBtn");
     if (rush) rush.addEventListener("click", function(){
       if (rush.disabled || !adReady("rushAdBtn")) return;
-      startAdCooldown("rushAdBtn");
-      Ads.show(function(){
+      Ads.show("rush", function(){
+        startAdCooldown("rushAdBtn");
         boostUntil = Math.max(boostUntil, Date.now() + 90000);
         sfx("upgrade"); showToast("Overtime Shift! <b>Rush ×8 for 90 seconds</b>.");
         render(); saveGame();
@@ -924,8 +984,8 @@
 
     var rr = document.getElementById("rerollBtn");
     if (rr) rr.addEventListener("click", function(){
-      startAdCooldown("rerollBtn");
-      Ads.show(function(){
+      Ads.show("reroll", function(){
+        startAdCooldown("rerollBtn");
         state.contract = newContract();
         state.contract.prog = state.contract.goal * 0.5;
         sfx("upgrade"); showToast("Contract Board refreshed with +50% Progress.");
@@ -939,8 +999,8 @@
       document.getElementById("dblAdSub").textContent = "WATCH AD \u00b7 TAPS \u00d74 FOR " + (TAP_BOOST_MS/1000) + "s";
       dbl.addEventListener("click", function(){
         if (tapBoostActive() || !adReady("dblAdBtn")) return;
-        startAdCooldown("dblAdBtn");
-        Ads.show(function(){
+        Ads.show("tap", function(){
+          startAdCooldown("dblAdBtn");
           tapBoostUntil = Date.now() + TAP_BOOST_MS;
           sfx("upgrade"); showToast("Double Payout! <b>Hand picks \u00d74 for " + (TAP_BOOST_MS/1000) + "s</b>.");
           render(); saveGame();
@@ -951,7 +1011,7 @@
     var ra = document.getElementById("repAdBtn");
     if (ra) ra.addEventListener("click", function(){
       if (pendingRep() < 1) return;
-      Ads.show(function(){
+      Ads.show("favour", function(){
         repBonusArmed = true; sfx("upgrade");
         showToast("Favour armed — sale gets <b>+25% REP &amp; +10 PAL</b>.");
         renderOffice(); render(); saveGame();

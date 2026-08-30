@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>The Rivenmark</title>
+<meta name="theme-color" content="#0b0908">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rivenmark">
+<link rel="manifest" href="app.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  html,body{margin:0;height:100%;background:#0b0908;overflow:hidden;
+            -webkit-tap-highlight-color:transparent}
+  canvas{display:block;touch-action:none}
+  #boot{position:fixed;inset:0;display:grid;place-items:center;color:#cebe9e;
+        font:14px ui-monospace,monospace;pointer-events:none}
+</style>
+<div id="boot">forging…</div>
+<!-- The core is a plain script, exactly as it is in the canvas build, so it
+     keeps the flat global scope everything in it expects. The bundle reads it
+     off `window`. Order matters: stubs, then the real host, then the core.
+     See host-real.js. -->
+<script src="host-stubs.js"></script>
+<script src="host-real.js"></script>
+<script src="core.js"></script>
+<script src="bundle.js"></script>
+<!-- Installability, and a delve that opens on a train. Registered last and
+     guarded: a service worker is an enhancement, and a page that will not boot
+     without one is a page that will not boot from file:// or over plain http,
+     which is exactly where this gets developed. -->
+<script>
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(e =>
+        console.log('no service worker: ' + e.message));
+    });
+  }
+</script>

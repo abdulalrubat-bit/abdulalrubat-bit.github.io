@@ -11,7 +11,7 @@
  * mistake as the stale bundle and the stale core, and the one with the longest
  * blast radius, because it lands on a device you cannot reach.
  */
-const VERSION = 'bd53eb31108f';
+const VERSION = '24b6c35ad073';
 const CACHE = 'rivenmark-' + VERSION;
 
 // Everything needed to boot with no network at all. Listed rather than

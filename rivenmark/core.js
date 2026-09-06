@@ -12,7 +12,7 @@
  * the game lives inside a function named draw, forge or paint, and those are
  * dropped here.
  *
- * 494 statements kept; 15 drawing functions and 47 page-bound statements dropped.
+ * 575 statements kept; 15 drawing functions and 52 page-bound statements dropped.
  * Re-run `npm run core` after changing ../index.html.
  */
 /* =============================================================================
@@ -49,7 +49,13 @@ let MAX_ENEMIES     = 340;   // measured: population is ~0.4ms of update at any
 // The delve is populated at generation time and cleared by walking into it,
 // rather than having waves pushed at the player forever. Packs sit dormant
 // until something wakes them, so pressure comes from what you walk into.
-const PACK_SAFE     = 430;   // no pack closer than this to the spawn pocket
+// No pack closer than this to the spawn pocket. It was 430 -- more than a
+// phone screen's width -- and with the spawn at the centre of the map that
+// emptied a fifth of every delve's floor, the fifth you start in and walk out
+// through. It is the dead space you notice, because it is the first thing you
+// see. Three hundred and sixty still means you can see the nearest pack from
+// where you land and it cannot see you.
+const PACK_SAFE     = 360;
 const PACK_APART    = 250;   // minimum spacing between pack sites
 // Slag placed on the map, as a multiple of the level's own quota. A fixed
 // budget was the old shape and it made the deep ladder unwinnable: the quota
@@ -62,6 +68,72 @@ const AGGRO_NEAR    = 250;   // a body notices you inside this
 const AGGRO_FAR     = 340;   // ...and the bigger, slower ones a little sooner
 const ALERT_R       = 155;   // a woken body pulls its neighbours up with it
 const ALERT_DELAY   = 0.18;  // ...one beat later, so a pack rouses in sequence
+
+/* --- WHAT GETS HARDER AS YOU GO DOWN -------------------------------------
+ * The ladder had one difficulty term and it was enemy HEALTH: placeEnemy
+ * multiplies a body's life by (1 + depth * 1.6) and its damage by nothing at
+ * all. winnable.js measured what that does -- the reference player clears the
+ * teaching rungs, hits a wall the moment the whole bestiary arrives, and then
+ * gets steadily EASIER all the way down, because the hero's life and damage
+ * both climb while what the horde hits for does not. The deepest delve was
+ * the safest one in the game.
+ *
+ * The obvious repair is to scale enemy damage with depth too, and it is the
+ * wrong one: `ward` is a flat share taken off every blow, so a ladder that
+ * multiplies incoming damage makes the one defensive stat in the game worth
+ * strictly less the further you carry it. The stat would still read the same
+ * on the item and mean less every rung. That is a worse fault than the valley.
+ *
+ * So depth buys the DELVE more teeth instead of the horde. Three terms, and
+ * the thing they have in common is that each one is answerable by standing
+ * somewhere else -- they tax position, which is the input the controls
+ * actually have, rather than taxing the health bar, which is the input the
+ * gear already answers:
+ *
+ *   ALERT_GROWTH    a woken body carries further, so deep packs come as one
+ *   AFFLICT_GROWTH  what is on you outlasts the fight that put it there
+ *   the spike beat   (with the traps) the floor gives you less of itself
+ *
+ * All three read `LEVEL.depth`, so `harrowed` and the first rungs are exactly
+ * what they were and nothing in the teaching ramp moves.
+ * ---------------------------------------------------------------------- */
+// The alert radius at the bottom of the ladder, as a share on top of the 155
+// above: 0.55 puts it at 240 against a PACK_APART of 250, so at the deep end
+// a roused pack reliably reaches for the next one and the room you woke is
+// the room you have to finish. HORDE_LIVE is what stops that running away --
+// the cap on bodies awake did not move, so this changes how much of the
+// delve arrives at once, not how much of it there is.
+const ALERT_GROWTH  = 0.55;
+const alertR = () => ALERT_R * (1 + (LEVEL.depth || 0) * ALERT_GROWTH);
+
+// How much longer an affliction outlasts the blow that opened it, at the
+// bottom of the ladder: 1.0 doubles it. DURATION and not rate -- a bleed that
+// hits harder is a blow you did not see and cannot answer, while a bleed that
+// lasts is a room you have to leave, and leaving is a thing the player can
+// actually do. It also keeps `ward` honest, since ward takes its share off
+// each tick either way and a longer wound does not devalue the stat.
+//
+// What this fixes and what it does not: BLEED_DPS is 7 flat while the hero's
+// life runs 152 to 528 across the ladder, so a wound's share of the Vanguard
+// still SHRINKS with depth -- doubling the clock halves the rate of that
+// decay, it does not reverse it. The term that actually bites deep is the
+// ground: embers and broken floor that last twice as long mean twice as much
+// of the room is on fire at any moment, and that is area denial rather than
+// arithmetic.
+const AFFLICT_GROWTH = 1.0;
+const linger = t => t * (1 + (LEVEL.depth || 0) * AFFLICT_GROWTH);
+/* Anything whose LIFETIME went through linger() has already been made worse by
+ * depth once, and must not be made worse by delveBite a second time.
+ *
+ * Measured, because the compound was invisible until it was: with both terms
+ * running, a patch of burning ground at the bottom of the ladder lasted twice
+ * as long AND hit twice as hard, which is four times the damage, and "burning
+ * ground" went from a line item to 45% of everything that killed the reference
+ * player at rung 44 -- the single biggest killer in the game. Doubling the
+ * clock was the design; quadrupling the total was an accident of two fixes
+ * meeting.
+ */
+const lingered = true;
 // How many bodies may be awake at once. The brief asked for a cap of 40-60 on
 // the horde; applied to bodies *placed* it breaks extraction outright, because
 // a delve holds 1.42x its own slag quota and the quota runs to 270 at ~1 slag
@@ -69,7 +141,13 @@ const ALERT_DELAY   = 0.18;  // ...one beat later, so a pack rouses in sequence
 // Applied to bodies AWAKE it gives the same wall of meat in front of you and
 // leaves the delve full behind it. Past the cap a pack still rouses when you
 // walk into it; what stops is the chain running on across the map.
-const HORDE_LIVE    = 54;
+// Opening the delve to the rim gave it a fifth more floor, and floor is the
+// horde's ally: the cap on bodies AWAKE did not move, but on open ground far
+// more of the same fifty-four actually reach you instead of piling up behind
+// rock. Measured on the reference player, the same delves went from three in
+// ten ending at the gate to under two. The cap comes down by what the floor
+// went up, so more room to fight in does not quietly mean more to fight.
+const HORDE_LIVE    = 46;
 const ELITE_CHANCE  = 0.16;  // share of packs led by a branded champion
 // Odds a pack site gets pitch beside it. Lives here with the other placement
 // knobs rather than down with the scenery it describes, because buildLevels
@@ -91,6 +169,21 @@ const MAX_DT        = 0.05;  // clamp after tab-switches / long frames
 // shadow in the game is derived from it, so masonry, bodies and loot all agree
 // about where the light is -- which is most of what sells depth in a flat view.
 const LIGHT = { x: 0.62, y: 0.78, wall: 11, body: 5 };
+
+/* The rim: what colour, how wide, how strong.
+ *
+ * Pale and barely warm rather than a colour of its own -- it has to read as
+ * LIGHT falling on eleven creatures painted in greens, purples, golds and
+ * bone, and a rim with an opinion tints every one of them towards itself.
+ * Width is in world units, so it is the same apparent thickness on a thrall
+ * as on the avatar rather than scaling with the body.
+ */
+const RIM_HUE = 'rgb(228,220,196)', RIM_W = 0.85, RIM_A = 0.5;
+
+/* The specular. Narrower and hotter than the rim, and banded to the materials
+ * that would carry one: above the cloth, below anything already glowing. */
+const SHEEN_HUE = 'rgb(255,248,232)', SHEEN_W = 0.45, SHEEN_A = 0.5;
+const SHEEN_LO = 62, SHEEN_HI = 190, SHEEN_SAT = 0.65;
 const HUD_H           = 78;   // canvas UI clears the HUD panel by this much
 // Holding the gate is the delve's second act, and the only part of a run that
 // can be stretched: a delve itself is bounded at roughly two minutes because a
@@ -127,10 +220,27 @@ const PORTAL_R        = 62;
 // sweep mows a broader swathe rather than punching through one more body.
 const BASE_PLAYER = {
   r: 14, maxHp: 100, speed: 205,
-  damage: 22, fireDelay: 0.50, range: 186, arcSpeed: 1550,
-  sweep: 28, shots: 1, magnet: 118, regen: 0,
+  damage: 22, fireDelay: 0.56, range: 186, arcSpeed: 1550,
+  sweep: 28, shots: 1, fan: 0, magnet: 118, regen: 0,
   iframe: 0.45
 };
+
+/* WHAT THE SWING IS WORTH ON ITS OWN.
+ *
+ * The blade swings by itself -- it always has, and on a game played with one
+ * thumb it has to. What it should not do is win the fight by itself, and it
+ * was: measured over ninety-six whole delves, seven tenths of every point of
+ * damage came off the automatic swing and a sixth off the six buttons, and
+ * the bar's share FELL with depth, from 22% on the first rung to 10% on the
+ * forty-fourth. The deeper you went the more the game played itself.
+ *
+ * So the crescent carries a share of the ward rather than all of it, and it
+ * comes round slower. `damage` still means what it always meant -- it is what
+ * the kit multiplies, so a ring that bites deeper bites deeper everywhere --
+ * and this is the one place the automatic swing is written down as less than
+ * the whole of you.
+ */
+const AUTO_BITE = 0.62;
 
 // Enemy archetypes. `weight` is the spawn share, ramped by `from` (seconds).
 // role decides how a body fights, not how hard. Until now every kind pressed
@@ -200,8 +310,43 @@ const ENEMY_TYPES = {
   // with him and they are the reason he is hard to reach.
   lieutenant: { r: 21, speed: 80, hp: 300, dmg: 26, tech: 12, cd: 1.15, mass: 4.4,
               role: 'press', slam: true,
-              color: '#c2352a', halo: 'rgba(232,192,96,.30)', weight: 0, from: 1e9 }
+              color: '#c2352a', halo: 'rgba(232,192,96,.30)', weight: 0, from: 1e9 },
+  /* THE CRUCIBLE-MASS. The second avatar, and deliberately the opposite
+   * question to the first.
+   *
+   * The Deceiver is a fight about TARGET PRIORITY: he moves, he blinks, he
+   * lies, and while a Lieutenant stands he takes almost nothing, so what the
+   * fight asks is "what are you hitting". Answer that and you can stand
+   * anywhere.
+   *
+   * This one cannot move at all, and asks the other half: WHERE ARE YOU
+   * STANDING. It is rooted to the arena, it shatters a burning ring of the
+   * floor around itself on a clock, and it mends while its totems stand. So
+   * the fight is a circle you have to keep moving round, with an errand out
+   * to the totems that runs THROUGH the fire -- and the errand is the whole
+   * encounter, because a Vanguard that never leaves the safe arc never
+   * out-damages the mending.
+   *
+   * Built from parts that already existed, which is why it costs almost
+   * nothing: the breaker's bracing keeps it from being shoved, the gorger's
+   * slam draws and lands the ring, and the shaman's totems are the escort.
+   * `look` tells the sprite forge to paint it as a gorger, so there is no new
+   * art either -- the same body at 45 units instead of 26, which is three
+   * times the footprint, with a hotter rim to say it is not one of them.
+   */
+  crucible: { r: 45, speed: 0, hp: 820, dmg: 30, tech: 30, cd: 1.6, mass: 40,
+              role: 'press', anchored: true, look: 'gorger',
+              color: '#ff5a24', halo: 'rgba(255,90,36,.34)', weight: 0, from: 1e9 }
 };
+
+/* An avatar, of either kind. There are two now, and every place that used to
+ * read `kind === 'deceiver'` was really asking this -- "is this the thing the
+ * delve is waiting on" -- so it is asked once, by name. The alternative was
+ * eight more `|| kind === 'crucible'` clauses, and the ninth one that somebody
+ * forgets is a boss that drops thrall loot or calcifies out of its own arena.
+ */
+const isAvatar = e => e.kind === 'deceiver' || e.kind === 'crucible';
+
 
 // --- the slam -------------------------------------------------------------
 // A blow with a wind-up you can see and outrun. The ring is drawn at its full
@@ -222,6 +367,55 @@ const INVADE_GIVEUP = 380; // "without reaching you" means staying this far off
 // --- the gorger -----------------------------------------------------------
 const FRACTURE_LIFE = 6.5;   // how long broken ground stays broken
 const FRACTURE_DPS  = 9;     // and what standing in it costs a second
+
+/* --- the Crucible-Mass ----------------------------------------------------
+ * The Furnace is a RING and not a disc, and that is the whole design. A disc
+ * centred on a rooted boss says "stand further away", which against something
+ * that cannot chase you is not a fight, it is a wait. A ring says "the floor
+ * at melee range is on fire and so is the floor at bow range, and the safe
+ * band is neither" -- and because the gaps move every cast, the safe band is
+ * somewhere else each time.
+ *
+ * FURNACE_ARC blocks of FURNACE_BLOCK across, thrown at FURNACE_R: seven
+ * blocks 192 units wide around a circle 1571 units round leaves about 230
+ * units of gap in total, in seven pieces. That is threadable, and it has to
+ * be threadable, because the totems are outside the ring and the boss is
+ * inside it.
+ */
+const FURNACE_CD    = 5.4;    // between rings
+const FURNACE_R     = 250;    // the radius it throws them at
+const FURNACE_ARC   = 7;      // how many blocks make the ring
+const FURNACE_BLOCK = 96;     // and how wide each block is
+const FURNACE_HIT   = 1.15;   // what one costs, as a share of its own damage
+/* What one standing totem gives it back, as a share of its own life a second.
+ *
+ * Proportional and not flat, for the reason winnable.js sets out at length: a
+ * flat number is a rounding error at the bottom of the ladder, and an
+ * encounter built on one would simply stop existing there.
+ *
+ * The value is solved, not guessed. A Vanguard geared to a rung's own power,
+ * standing in reach and swinging with the bar on cooldown, does this much of
+ * the boss's health pool a second -- measured, three rungs across the ladder:
+ *
+ *     rung  8   165 dps against 1457 life   0.113 /s
+ *     rung 26   351 dps against 2114 life   0.166 /s
+ *     rung 50   738 dps against 2991 life   0.247 /s
+ *
+ * The design wants three totems to beat the best of those and one to lose to
+ * the worst, which brackets it: above 0.247/3 = 0.082 and below 0.113. At
+ * 0.095 all three standing out-mends every rung, two is a race the deep rungs
+ * lose, and one is never enough to save it. So the errand is real and it is
+ * also partial credit -- cutting two of three is a win, which matters,
+ * because cutting all three while the ring is turning is not always on offer.
+ *
+ * Those figures are a ceiling besides: they are a hero who never stops to
+ * dodge. A real one is doing this between rotations, so the totems are worth
+ * more in play than they are here.
+ */
+const CRUCIBLE_MEND = 0.095;
+const CRUCIBLE_CALL = 9.5;    // how often it calls another shaman
+const CRUCIBLE_KEEP = 3;      // and how many it will keep standing
+const CRUCIBLE_TEND = 340;    // a totem this close to it is one of its own
 
 // --- the flayer -----------------------------------------------------------
 const STALK_HOLD  = 220;   // the distance it waits at between runs
@@ -298,14 +492,14 @@ const HEROES = {
            magic:'#ffc24d', trim:'rgba(196,142,44,.9)', cape:[86,32,26],
            blurb:'The vanguard’s anchor. Sun-Gold magic, a sun-emblazoned shield, ' +
                  'and no purchase for the Deceiver’s illusions.',
-           maxHp:125, speed:196, damage:22, fireDelay:0.56,
+           maxHp:125, speed:196, damage:22, fireDelay:0.62,
            range:178, sweep:33, arcSpeed:1480 },
   zayd:  { id:'zayd', name:'Zayd', title:'The Piercing Truth',
            order:'Frost-Scholars of Kael', school:'Azure',
            magic:'#5fd0ff', trim:'rgba(70,150,196,.9)', cape:[30,44,72],
            blurb:'A tactician of Kael. The Sapphire Glaive severs hive-mind tethers, ' +
                  'and inverted ley-lines hold no confusion for him.',
-           maxHp:92, speed:228, damage:17, fireDelay:0.42,
+           maxHp:92, speed:228, damage:17, fireDelay:0.48,
            range:206, sweep:21, arcSpeed:1720 }
 };
 
@@ -425,6 +619,7 @@ function hash32(n) {
 
 // The name a rung's boss will carry, built from the same roll the fight uses.
 function bossTitle(L) {
+  if (L.boss === 'crucible') return 'The Crucible-Mass';
   return deceiverName((L.mutators || []).map(id => MUTATOR_BY_ID[id]).filter(Boolean));
 }
 
@@ -432,6 +627,11 @@ function bossTitle(L) {
 // where the mutator flavour lives -- read before you descend, not shouted at
 // you while he arrives.
 function bossNote(L) {
+  // The epithets are the Deceiver's. The Crucible-Mass has one property and
+  // it never varies, so the card says the property instead of a mutator that
+  // was never rolled for it.
+  if (L.boss === 'crucible')
+    return ' \u2014 rooted where it stands, and its totems mend it';
   const m = MUTATOR_BY_ID[(L.mutators || [])[0]];
   return m ? ' \u2014 ' + m.note : '';
 }
@@ -531,6 +731,7 @@ function buildLevels() {
                : regions.slice(0, Math.min(regions.length, 1 + Math.floor(d * 5)));
     const ramp = RAMP[i];
     const horde = ramp ? ramp.horde.slice() : FULL_HORDE.slice();
+    const crucible = !ramp && i % 3 === 2;
     out.push({
       id: i === 0 ? 'test' : 'delve' + i,
       name: name,
@@ -541,17 +742,62 @@ function buildLevels() {
           ' of the Shattered Realm.',
       regions: pool,
       horde: horde,
-      boss: 'deceiver',
+      /* Which avatar is waiting. The teaching ramp is the Deceiver's alone --
+       * a second boss is a second set of rules to read, and the first eight
+       * rungs already have one new archetype each. Past it, every third rung
+       * is the Crucible-Mass, so the two alternate often enough that neither
+       * becomes the thing you stop reading, and the Deceiver still holds two
+       * rungs in three because he is the fiction the ladder is named for.
+       *
+       * Fixed by index and not rolled, like everything else here: the same
+       * rung always answers with the same thing, so a delve is learnable.
+       */
+      boss: crucible ? 'crucible' : 'deceiver',
       // The first rungs meet the avatar plainly. An epithet is a rule you have
-      // to read, and there is nothing to read it against yet.
-      mutators: (!ramp || ramp.mutate) ? rollMutators(i, d) : [],
+      // to read, and there is nothing to read it against yet. The mutators are
+      // the Deceiver's own besides -- they set his blink, his mirages and his
+      // guard, and nothing in them means anything to a body that cannot move
+      // -- so a Crucible rung rolls none and its card says what it is instead.
+      mutators: (crucible || (ramp && !ramp.mutate)) ? [] : rollMutators(i, d),
       elites: ramp ? ramp.elites : ELITE_CHANCE,
       pitch: ramp ? ramp.pitch : PITCH_RATE,
       invade: ramp ? ramp.invade : 1,
       guard: ramp ? ramp.guard : -1,       // -1 means "however deep it is"
       lesson: ramp ? ramp.lesson : null,
-      // Expected power, and the terms that follow from it.
-      power: Math.round(4 + d * 96),
+      /* Expected power: what the card advertises, and what refreshDelveLine
+       * recommends by -- it picks the deepest rung your power qualifies for,
+       * so this number decides where players are SENT.
+       *
+       * It was `4 + d * 96`, linear, and linear was wrong. Measured by gearing
+       * the reference player to multiples of each rung's own advice and asking
+       * where it starts getting out:
+       *
+       *     rung   card said   actually took   out by
+       *      3        10            30          3.0x
+       *      9        21            42          2.0x
+       *     17        36          57-72        ~1.8x
+       *     30        60            90          1.5x
+       *     44        87          87-110       ~1.1x
+       *
+       * The advice was not merely low, it was low in a SHAPE: worst at the
+       * shallow end and about right at the deep one. And that is the whole of
+       * the cliff the ladder has always had at rungs 3 to 17 -- not a fight
+       * that is too hard, a rung the game actively told you that you were
+       * ready for. It sent a power-10 hero into a delve that wanted 30.
+       *
+       * The reason is content, and it is visible in RAMP right above: the
+       * first eight rungs each add a whole archetype, plus pitch, champions,
+       * invasions and epithets, while a linear curve gave the hero an eighth
+       * of its total growth over the same stretch. Demands rise fastest at the
+       * start, so the curve has to as well -- d^0.6 is what fits every
+       * measured point above, and it still starts at 4, so a Vanguard who has
+       * never descended still qualifies for the proving ground.
+       *
+       * The bot is a pessimistic yardstick -- it does not kite and does not
+       * use the terrain -- so these are an upper bound on what a person needs.
+       * What is not in doubt is the shape.
+       */
+      power: Math.round(4 + 116 * Math.pow(d, 0.6)),
       depth: d,
       quota: Math.round(125 + d * 145),
       channel: 4.0
@@ -761,8 +1007,111 @@ const SET_BONUSES = [
   { at:8, text:'a second crescent with every strike', add:{ shots:1 } }
 ];
 
+/* WHERE EACH PIECE LIES.
+ *
+ * The Regalia was sundered across the Shattered Realm, and each region kept
+ * what fell in it. Farming one rung over and over for eight random slots is
+ * the shortest path to a player seeing the same corridor two hundred times;
+ * knowing that the rings are in the Rot-Weald is a reason to go somewhere
+ * else.
+ *
+ * The brief this came from asked for a Helm and Pauldrons in the Slag-Moors.
+ * There are no such slots -- the eight are blade, off-hand, mail, girdle,
+ * boots, amulet and two rings -- and the one the other four regions leave
+ * spare is the off-hand. That is the right answer anyway: the Unbroken Ward
+ * is a Hearth-Warden's shield and the Weeping Keep of Tor-Varden is where the
+ * Hearth-Wardens come from. Every slot is claimed exactly once.
+ */
+/* --- DAILY BOUNTIES ------------------------------------------------------
+   One delve a day, named in advance, on ground that has been changed.
+
+   The brief called these "mutators", and the game already has a thing by that
+   name -- the Deceiver's epithets, which are rolled per RUNG and are what make
+   the ladder learnable. These are a different animal: they change the DELVE
+   rather than the avatar, they last a day rather than for ever, and they are
+   the same for everybody. Naming them bounties keeps the two apart, which
+   matters more than matching the brief's word.
+
+   Deterministic from the day, so no state has to be stored to decide what the
+   bounty is -- only whether you have taken it. The same twist, on the same
+   rung, for everyone, until midnight.
+
+   Each is a TRADE rather than a difficulty setting: something worse, something
+   better. A bounty that is only harder is a chore with a prize on it.
+   ---------------------------------------------------------------------- */
+const BOUNTIES = [
+  { id: 'quickening', name: 'The Quickening',
+    note: 'Everything in it moves a quarter faster, and carries a third more slag.',
+    twist: { speed: 1.25, slag: 1.33 } },
+  { id: 'hoard', name: 'The Hoard',
+    note: 'Twice the coffers, and half the coin off a body.',
+    twist: { chests: 2, coin: 0.5 } },
+  { id: 'brittle', name: 'The Brittle Host',
+    note: 'A quarter less life in them, a quarter more in their blows.',
+    twist: { hp: 0.75, dmg: 1.25 } },
+  { id: 'teeming', name: 'The Teeming',
+    note: 'Half again as many of them, and each one worth less.',
+    twist: { slag: 1.5, tech: 0.7 } }
+];
+const BOUNTY_BY_ID = {};
+for (const b of BOUNTIES) BOUNTY_BY_ID[b.id] = b;
+
+// Days since the epoch, in LOCAL time -- a bounty that turns over at UTC
+// midnight turns over mid-evening for half the world.
+function dayStamp(now) {
+  const d = new Date(now === undefined ? Date.now() : now);
+  // The calendar date where the player is, turned into a day number. Built
+  // from the local Y/M/D through Date.UTC rather than by dividing the
+  // timestamp, so it does not slide by an hour twice a year.
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+}
+
+/* Which bounty, and where. Both fall out of the day, so nothing has to be
+ * stored or synchronised -- and the rung is drawn from the shallow half of the
+ * ladder, because a daily nobody can reach is a daily nobody does. */
+function todaysBounty(now) {
+  const day = dayStamp(now);
+  // Two different mixes of the same number, or the bounty and the rung would
+  // march up the ladder in lockstep.
+  const b = BOUNTIES[hash32(day * 2 + 1) % BOUNTIES.length];
+  const span = Math.max(1, Math.floor(LEVELS.length * 0.55));
+  const L = LEVELS[hash32(day * 40503 + 17) % span];
+  return { day, id: b.id, name: b.name, note: b.note, twist: b.twist,
+           level_id: L.id, level: L.name };
+}
+const bountyDone = () => !!(stash.bounty && stash.bounty.day === dayStamp() &&
+                            stash.bounty.done);
+
+/* What the delve is worth changing. Read through one function so a twist that
+ * is not armed costs exactly one property lookup, and so every place that
+ * bends to a bounty bends the same way. */
+function twist(k) {
+  const t = run && run.bounty && run.bounty.twist;
+  return (t && t[k] !== undefined) ? t[k] : 1;
+}
+
+const REGION_RELIC = {
+  slag:    ['offhand'],            // The Weeping Keep of Tor-Varden
+  vaelk:   ['boots', 'girdle'],    // The Kael-Dorm Redoubt
+  kraggen: ['mail'],               // The Shatter-Gate of Ghor
+  weald:   ['ring1', 'ring2'],     // The Heart-Rot Clearing
+  firth:   ['blade', 'amulet']     // The Ash-Shoals
+};
+// Weighted, not locked. A region that ONLY ever yields its own pieces makes
+// the last slot of a set hostage to one delve a player may not be able to
+// beat, and the reliquary already exists as the pity valve for exactly that.
+// Seven times in ten it is what the ground keeps; the rest is anything.
+const RELIC_HERE = 0.7;
+
+function relicSlotFor(regionId) {
+  const here = REGION_RELIC[regionId];
+  if (here && here.length && Math.random() < RELIC_HERE)
+    return here[(Math.random() * here.length) | 0];
+  return SLOTS[(Math.random() * SLOTS.length) | 0].id;
+}
+
 function rollSetPiece(slotId) {
-  const slot = slotId || SLOTS[(Math.random() * SLOTS.length) | 0].id;
+  const slot = slotId || relicSlotFor(REGION && REGION.id);
   const def = SET_PIECES[slot];
   return { uid: ++itemSeq, slot, base: def.base, rarity: 'mythic', set: SET_ID,
            affixes: def.affixes.map(a => ({ id: a[0], v: a[1] })),
@@ -833,6 +1182,49 @@ const AFFIX_BY_ID = {};
 for (const a of AFFIXES) AFFIX_BY_ID[a.id] = a;
 
 // Which affixes a slot can roll. Keeps a blade feeling like a blade.
+/* BRANDS: what a Riven piece does, as opposed to what it adds up to.
+ *
+ * Every affix above moves one number in one direction, so the best item in the
+ * game is the one with the biggest numbers and there is nothing to think
+ * about. A brand moves two, against each other, and one of them changes how
+ * the blade behaves rather than how hard it hits. It is a decision: the fan
+ * clears a room and cannot fight one thing, the reaving edge fights one thing
+ * across the hall and cannot clear a room.
+ *
+ * Mechanically they are affixes -- same {id, v} shape on the item, same
+ * AFFIX_BY_ID lookup, same fold in recomputeStats -- so nothing that reads,
+ * validates, saves, tempers or prices an item has to learn a second kind. The
+ * only new thing is that a brand carries an `add`/`mul` BUNDLE instead of a
+ * single stat, and `v` is a roll on how strong the bundle is.
+ *
+ * They roll only on Riven, only on the slot they belong to, and only ever one
+ * to a piece: two brands on one item is two mechanics arguing.
+ */
+const BRANDS = [
+  { id: 'fan', slot: 'blade', name: 'Sundering',
+    word: 'three crescents in a fan, and half again the swing time',
+    lo: 1, hi: 1, add: { shots: 2, fan: 1 }, mul: { fireDelay: 0.5 } },
+  { id: 'reave', slot: 'blade', name: 'Reaving',
+    word: 'crescents carry twice as far, and cut a third as wide',
+    lo: 1, hi: 1, mul: { range: 1.0, sweep: -0.66 } },
+  { id: 'headlong', slot: 'boots', name: 'Headlong',
+    word: 'a third again the stride, at a fifth of your life',
+    lo: 1, hi: 1, mul: { speed: 0.34, maxHp: -0.20 } },
+  { id: 'covet', slot: 'girdle', name: 'Covetous',
+    word: 'the delve comes to you — triple draw, at a seventh of your life',
+    lo: 1, hi: 1, mul: { magnet: 2.0, maxHp: -0.14 } }
+];
+// Brands go into AFFIX_BY_ID beside the ordinary affixes, so validItem,
+// affixText, the temper, the vault and the save file all treat one as an affix
+// and none of them has to know what it is. Registered HERE rather than up with
+// the affix table, which runs before this declaration and cannot see it.
+for (const b of BRANDS) { b.brand = true; AFFIX_BY_ID[b.id] = b; }
+const BRAND_BY_SLOT = {};
+for (const b of BRANDS) (BRAND_BY_SLOT[b.slot] = BRAND_BY_SLOT[b.slot] || []).push(b);
+// Odds a Riven piece in a branded slot is branded. Not every one: a Riven
+// blade that is always Sundering or Reaving is two items rather than a tier.
+const BRAND_ODDS = 0.55;
+
 const SLOT_AFFIXES = {
   blade:   ['damage','damageP','reach','sweep','cadence'],
   offhand: ['ward','life','damageP','sweep','regen'],
@@ -889,6 +1281,14 @@ function rollItem(depth, slotId) {
     v = a.dp ? +v.toFixed(a.dp) : (Math.abs(a.lo) >= 1 ? Math.max(1, Math.round(v)) : v);
     affixes.push({ id, v });
   }
+  // The brand REPLACES a rolled affix rather than being added to them, so a
+  // branded Riven is not simply a Riven with a sixth line on it -- the trade
+  // costs a slot as well as a stat.
+  const brands = rarity.id === 'riven' && BRAND_BY_SLOT[slot];
+  if (brands && affixes.length && Math.random() < BRAND_ODDS) {
+    const br = brands[(Math.random() * brands.length) | 0];
+    affixes[0] = { id: br.id, v: br.lo + Math.random() * (br.hi - br.lo) };
+  }
   return { uid: ++itemSeq, slot, base, rarity: rarity.id, affixes,
            name: affixes.length ? AFFIX_BY_ID[affixes[0].id].name + ' ' + base : base };
 }
@@ -896,6 +1296,9 @@ function rollItem(depth, slotId) {
 function affixText(af, hero) {
   const a = AFFIX_BY_ID[af.id];
   if (!a) return '';
+  // A brand's word is the whole sentence: there is no single number to
+  // substitute into it, because it moves two in opposite directions.
+  if (a.brand) return a.word;
   let v;
   // An additive affix whose roll is a fraction has to say so, or it prints the
   // float: the synergy ward is `isaacWard`, so keying the percentage off the
@@ -952,6 +1355,14 @@ function recomputeStats() {
       // An affix forged for this Vanguard pays more in their hands.
       const k = (a.hero && a.hero === p.hero) ? SYNERGY_BONUS : 1;
       const v = af.v * k;
+      // A brand carries a bundle rather than a stat, and `v` scales it. Same
+      // two piles, so the order it was equipped in still cannot matter.
+      if (a.brand) {
+        for (const st in (a.add || {})) add[st] = (add[st] || 0) + a.add[st] * v;
+        for (const st in (a.mul || {}))
+          mul[st] = (mul[st] === undefined ? 1 : mul[st]) * (1 + a.mul[st] * v);
+        continue;
+      }
       if (a.mul) mul[a.stat] = (mul[a.stat] === undefined ? 1 : mul[a.stat]) * (1 + v);
       else add[a.stat] = (add[a.stat] || 0) + v;
     }
@@ -1186,15 +1597,33 @@ function carveHalls() {
   // twenty-eight by twenty-seven that swallowed a quarter of the map each, and
   // the result read as open ground with rocks in it rather than as rooms. A
   // large leaf now holds a normal room with a lot of rock around it.
+  /* MARGIN is rock kept between a room and the edge of its leaf, so that two
+   * rooms in neighbouring leaves are not cut into one. At the OUTSIDE of the
+   * map there is no neighbouring leaf -- there is the end of the world -- and
+   * the only thing needed there is a course of rock to draw a wall on. Two
+   * cells were being kept anyway, on top of the one the split already leaves,
+   * so every delve was cut inside a three-cell dead border: measured, the
+   * floor of a delve spanned cells 3 to 46 of fifty, which is 77% of the map
+   * by area and a hundred and twenty units of nothing on every side.
+   *
+   * No margin at all at the rim, MARGIN everywhere else: carveRect already
+   * refuses cells 0 and GW-1, so the course of rock the wall is drawn on is
+   * kept whatever this asks for. The floor of a delve spans 1 to 48 now.
+   */
+  const RIM = 0;
   const halls = [];
   for (const L of leaves) {
-    const maxW = Math.min(MAXR, L.w - MARGIN * 2);
-    const maxH = Math.min(MAXR, L.h - MARGIN * 2);
+    const mL = L.x <= 1 ? RIM : MARGIN;
+    const mT = L.y <= 1 ? RIM : MARGIN;
+    const mR = L.x + L.w >= GW - 1 ? RIM : MARGIN;
+    const mB = L.y + L.h >= GH - 1 ? RIM : MARGIN;
+    const maxW = Math.min(MAXR, L.w - mL - mR);
+    const maxH = Math.min(MAXR, L.h - mT - mB);
     if (maxW < MINR || maxH < MINR) continue;
     const w = MINR + ((Math.random() * (maxW - MINR + 1)) | 0);
     const h = MINR + ((Math.random() * (maxH - MINR + 1)) | 0);
-    const x = L.x + MARGIN + ((Math.random() * (L.w - MARGIN * 2 - w + 1)) | 0);
-    const y = L.y + MARGIN + ((Math.random() * (L.h - MARGIN * 2 - h + 1)) | 0);
+    const x = L.x + mL + ((Math.random() * (L.w - mL - mR - w + 1)) | 0);
+    const y = L.y + mT + ((Math.random() * (L.h - mT - mB - h + 1)) | 0);
     carveRect(x, y, x + w - 1, y + h - 1);
     halls.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) });
   }
@@ -1940,7 +2369,7 @@ function makePlayer(x, y, heroId) {
   p.swing = 0; p.swingA = 0;
   p.gait = 0; p.pace = 0;
   p.strike = 0; p.recov = 0;
-  p.bleed = 0; p.bleedDps = 0; p.bleedTick = 0;
+  p.bleed = 0; p.bleedDps = 0; p.bleedTick = 0; p.bleedSized = false;
   p.upg = {};
   p.level = stash.level || 1;
   p.gear = {};
@@ -1978,13 +2407,19 @@ function typeWeights(t) {
 function placeEnemy(kind, x, y, depth) {
   if (enemies.length >= MAX_ENEMIES) return null;
   const d = ENEMY_TYPES[kind];
-  const scale = (1 + depth * PACK_DEPTH_HP) * DIFF.threat * (1 + (LEVEL.depth || 0) * 1.6);
+  const scale = (1 + depth * PACK_DEPTH_HP) * DIFF.threat *
+                (1 + (LEVEL.depth || 0) * 1.6) * twist('hp');
   // Same body newBody makes, then the things that only a placed one has: it is
   // asleep where the generator put it, it remembers that spot, and a heavy one
   // notices further off.
   const e = newBody(kind, x, y, 0);
   e.hp = e.maxHp = d.hp * scale;
-  e.dmg = d.dmg * DIFF.threat;
+  e.dmg = d.dmg * DIFF.threat * twist('dmg');
+  e.speed *= twist('speed');
+  // Slag is what the delve is FOR, so a bounty that changes how much of it
+  // there is has to change what a body carries as well as how many there are,
+  // or the quota moves without the fight moving with it.
+  e.tech = Math.max(1, Math.round(e.tech * twist('tech')));
   e.awake = false;
   e.home = { x, y };
   e.aggro = d.r >= 20 ? AGGRO_FAR : AGGRO_NEAR;
@@ -2036,12 +2471,16 @@ function wakeEnemy(e, chain) {
   // running on past it, so the fight in front of you stays a fight rather
   // than becoming the whole delve at once.
   if ((run.awake || 0) >= HORDE_LIVE) return;
-  enemyGrid.query(e.x, e.y, ALERT_R, _alert);
+  // Asked once and reused for both the broad-phase and the exact test: they
+  // are the same radius by construction, and a version that read the constant
+  // in one and the scaled value in the other would rouse through the gap.
+  const R = alertR();
+  enemyGrid.query(e.x, e.y, R, _alert);
   for (let i = 0; i < _alert.length; i++) {
     const o = _alert[i];
     if (o === e || o.awake || o.hp <= 0) continue;
     if (o.alert > 0) continue;
-    if (dist2(e.x, e.y, o.x, o.y) > ALERT_R * ALERT_R) continue;
+    if (dist2(e.x, e.y, o.x, o.y) > R * R) continue;
     o.alert = ALERT_DELAY;
   }
 }
@@ -2099,7 +2538,7 @@ function placePacks(spawn) {
   const sites = [];
   const roster = LEVEL.horde;
 
-  const budget = Math.round((LEVEL.quota || 125) * SLAG_HEAD);
+  const budget = Math.round((LEVEL.quota || 125) * SLAG_HEAD * twist('slag'));
   // Reservoir of candidate sites, kept apart so packs read as separate groups.
   // A deep delve needs more of them to carry its larger budget, but they still
   // have to fit: the cap is a ceiling, and the loop stops early if the floor
@@ -2393,7 +2832,7 @@ function fire() {
     const d = dist2(player.x, player.y, e.x, e.y);
     // The avatar comes first among what can actually be hit -- nearest-target
     // alone cannot fight a boss, because his escort soaks every crescent.
-    if (e.kind === 'deceiver') { if (d < avatarD) { avatarD = d; avatar = e; } }
+    if (isAvatar(e)) { if (d < avatarD) { avatarD = d; avatar = e; } }
     if (d < bestD) { bestD = d; best = e; }
   }
   best = avatar || best;
@@ -2403,9 +2842,16 @@ function fire() {
   // Extra crescents stagger behind the first rather than fanning out: two
   // blades of light chasing the same line reads as a combination strike, where
   // a spread reads as a shotgun.
+  // Extra crescents normally stagger behind the first down the same line --
+  // two blades of light chasing one target reads as a combination strike where
+  // a spread reads as a shotgun. A FAN is the deliberate exception: the
+  // Sundering brand buys width with cadence, so its crescents go wide and
+  // together, which is the whole of what it is for.
+  const fan = (player.fan || 0) > 0;
+  const step = fan ? 0.34 : 0.15;
   for (let i = 0; i < player.shots; i++) {
-    const a = base + (i === 0 ? 0 : (i % 2 ? 1 : -1) * 0.15 * Math.ceil(i / 2));
-    releaseCrescent(a, i * 0.055);
+    const a = base + (i === 0 ? 0 : (i % 2 ? 1 : -1) * step * Math.ceil(i / 2));
+    releaseCrescent(a, fan ? 0 : i * 0.055);
   }
   player.swing    = SWING_TIME;
   player.recov    = 0;
@@ -2442,7 +2888,7 @@ function releaseCrescent(a, delay) {
     x: player.x + Math.cos(a) * (player.r + 8),
     y: player.y + Math.sin(a) * (player.r + 8),
     dx: Math.cos(a), dy: Math.sin(a), a: a,
-    speed: player.arcSpeed, dmg: player.damage,
+    speed: player.arcSpeed, dmg: player.damage * AUTO_BITE,
     half: half, bow: bow, band: 11,
     delay: delay || 0,
     life: player.range / player.arcSpeed,
@@ -2466,9 +2912,12 @@ function clearShot(x0, y0, x1, y1) {
 }
 
 function dropLoot(e) {
+  // One lump, so the ring is a single angle -- but through the same spill, or
+  // a coffer and a body would throw their slag differently for no reason a
+  // player could name.
+  const s = spill(e.x, e.y, 1, 0, 1);
   loot.push({
-    x: e.x, y: e.y,
-    vx: rand(-38, 38), vy: rand(-38, 38),
+    x: s.x, y: s.y, vx: s.vx * 0.45, vy: s.vy * 0.45,
     value: e.tech, r: 6, spin: Math.random() * TAU, life: 0, pulled: false
   });
   maybeDropItem(e);
@@ -2483,24 +2932,24 @@ function maybeDropItem(e) {
                       (Math.hypot(WORLD.w, WORLD.h) * 0.5), 0, 1);
   // What killed matters as much as where. A thrall is a lottery ticket; a
   // champion is the reason to fight one.
-  let chance = e.kind === 'deceiver' ? 1 :
+  let chance = isAvatar(e) ? 1 :
                e.elite               ? 0.85 :
                e.kind === 'breaker'  ? 0.22 :
                e.kind === 'mirage'   ? 0 : 0.055;
-  chance *= (1 + depth * 0.8) * DIFF.lootRate;
-  const n = e.kind === 'deceiver' ? 3 : e.elite ? 2 : 1;
+  chance *= (1 + depth * 0.8) * lootMult();
+  const n = isAvatar(e) ? 3 : e.elite ? 2 : 1;
 
   // Regalia pieces come off champions and the avatar only -- and an invader
   // always. Being hunted through a delve you did not plan to fight in is the
   // price, and it should be paid.
-  const setOdds = e.invader ? 1 : e.kind === 'deceiver' ? 0.55 : e.elite ? 0.14 : 0;
+  const setOdds = e.invader ? 1 : isAvatar(e) ? 0.55 : e.elite ? 0.14 : 0;
   // Coin falls with the gear. It is the only thing in the delve that is not
   // luck: whatever the drops do, coin accumulates, which is what makes it the
   // right currency for buying your way past a bad streak.
-  const purse = e.kind === 'deceiver' ? 90 : e.elite ? 26 : e.kind === 'breaker' ? 9 : 2;
+  const purse = isAvatar(e) ? 90 : e.elite ? 26 : e.kind === 'breaker' ? 9 : 2;
   if (purse) {
     run.coins += Math.round(purse * (0.7 + Math.random() * 0.7) *
-                            (1 + (LEVEL.depth || 0) * 1.4) * DIFF.lootRate);
+                            (1 + (LEVEL.depth || 0) * 1.4) * lootMult() * twist('coin'));
   }
 
   const push = it => drops.push({
@@ -2508,14 +2957,14 @@ function maybeDropItem(e) {
     vx: rand(-46, 46), vy: rand(-46, 46),
     item: it, r: 9, life: 0, pulled: false });
 
-  if (setOdds && Math.random() < setOdds * DIFF.setRate * setBoost()) {
+  if (setOdds && Math.random() < setOdds * relicMult() * setBoost()) {
     push(rollSetPiece());
-    if (e.kind !== 'deceiver') return;      // one piece is the whole prize
+    if (!isAvatar(e)) return;               // one piece is the whole prize
   }
   for (let i = 0; i < n; i++) {
     if (i === 0 && Math.random() > chance) return;
     // Quality floor by what it came off, so a champion never hands you rags.
-    const floor = e.kind === 'deceiver' ? 0.85 : e.elite ? 0.7 : 0;
+    const floor = isAvatar(e) ? 0.85 : e.elite ? 0.7 : 0;
     push(rollItem(Math.max(depth, floor)));
   }
 }
@@ -2531,9 +2980,10 @@ function maybeDropItem(e) {
    already off-screen; the reach of what the Vanguard carries simply closes,
    which is enough to make a room you had read stop being read.
    -------------------------------------------------------------------- */
-function openWound(dps, life) {
+function openWound(dps, life, sized) {
   player.bleed = Math.max(player.bleed || 0, life);
   player.bleedDps = dps;
+  player.bleedSized = !!sized;
   player.bleedTick = Math.min(player.bleedTick || BLEED_TICK, BLEED_TICK);
 }
 
@@ -2547,7 +2997,7 @@ function updateBleed(dt) {
     // a bleed the player can outrun by taking another blow is not a bleed.
     const was = player.invuln;
     player.invuln = 0;
-    hurtPlayerBy(player.bleedDps * BLEED_TICK, player.x, player.y);
+    hurtPlayerBy(player.bleedDps * BLEED_TICK, player.x, player.y, player.bleedSized);
     player.invuln = was;
     floatDmg(player.x, player.y - player.r * 1.4, player.bleedDps * BLEED_TICK, 'bleed');
     if (player.hp > 0) burst(player.x, player.y, PAL.blood, 4, 90);
@@ -2660,7 +3110,10 @@ const CHEST_ROW = { coffer: 0, warded: 1 };
 const CHEST_OPEN = 0.45;        // seconds the lid takes to come up
 let chestImg = null;
 const CHEST_REACH = 30;
-const CHEST_SAFE  = 320;    // never this near the spawn pocket
+// Never this near the spawn pocket -- but near enough that the ground you
+// cross on the way out has something in it. A coffer in the approach is the
+// cheapest thing that turns walking into exploring.
+const CHEST_SAFE  = 250;
 const CHEST_APART = 300;    // nor this near each other
 
 // Every coffer in a delve, opened, comes to about a third of what the whole
@@ -2670,16 +3123,16 @@ const CHEST_APART = 300;    // nor this near each other
 // feel robbed, and the gear the warded ones carry is on top of it.
 const CHEST_KINDS = {
   coffer: { coin: [34, 74],  gear: 0.34, floor: 0,    name: 'A coffer',
-            colour: '#c9a24a' },
+            slag: [4, 7],  colour: '#c9a24a' },
   warded: { coin: [112, 205], gear: 1,   floor: 0.62, name: 'A warded coffer',
-            colour: '#8fb8ff' }
+            slag: [9, 14], colour: '#8fb8ff' }
 };
 
 function placeChests(spawn, portal) {
   chests = [];
   if (!openCells.length) return;
   const depth = LEVEL.depth || 0;
-  const want = 3 + Math.round(depth * 3);
+  const want = Math.round((3 + Math.round(depth * 3)) * twist('chests'));
   const warded = Math.random() < 0.45 + depth * 0.4 ? 1 : 0;
 
   // Penned-in ground first. narrowGrid is 0 at a crossroads and 4 at a dead
@@ -2716,13 +3169,34 @@ function placeChests(spawn, portal) {
   }
 }
 
+/* THE FOUNTAIN.
+ *
+ * A coffer used to hand you a number and drop one thing ten units away. What
+ * came out of it read as a transaction; what should come out of it is a
+ * spill. Everything leaves the chest on a RING -- an angle each, evenly spaced
+ * with a little jitter, at a speed that carries it a body's length -- so the
+ * eye sees a fountain rather than a heap, and so the walk back to pick it all
+ * up is a beat of its own.
+ *
+ * Evenly spaced rather than randomly angled: eight random angles cluster, and
+ * a cluster is the heap again. The jitter is what keeps it from reading as a
+ * clock face.
+ */
+const SPILL_SPEED = [150, 260];
+function spill(x, y, n, i, total) {
+  const a = (i / Math.max(1, total)) * TAU + rand(-0.22, 0.22);
+  const v = rand(SPILL_SPEED[0], SPILL_SPEED[1]);
+  return { x: x + Math.cos(a) * 6, y: y + Math.sin(a) * 6,
+           vx: Math.cos(a) * v, vy: Math.sin(a) * v };
+}
+
 function openChest(ch) {
   if (ch.open) return;
   ch.open = true;
   ch.t = 0;                      // the lid takes CHEST_OPEN to come up
   const K = CHEST_KINDS[ch.kind];
   const depth = LEVEL.depth || 0;
-  const coin = Math.round(rand(K.coin[0], K.coin[1]) * (1 + depth * 1.4) * DIFF.lootRate);
+  const coin = Math.round(rand(K.coin[0], K.coin[1]) * (1 + depth * 1.4) * lootMult());
   run.coins += coin;
   run.chests = (run.chests || 0) + 1;
 
@@ -2730,17 +3204,32 @@ function openChest(ch) {
   ring(ch.x, ch.y, K.colour, 8, 46, 0.4);
   floatDmg(ch.x, ch.y - 12, coin, 'coin');
 
+  // SLAG, in a cluster. Coin is banked the instant the lid comes up and is
+  // therefore not a reason to walk anywhere; slag has to be picked up off the
+  // floor, which is what makes a coffer somewhere you go rather than something
+  // you touch. It is the same pickup a body leaves, so nothing new has to
+  // learn to collect it.
+  const lumps = K.slag[0] + ((Math.random() * (K.slag[1] - K.slag[0] + 1)) | 0);
+  const worth = Math.max(1, Math.round((1 + depth * 2.2) * lootMult()));
+  const gear = Math.random() < K.gear * lootMult()
+    ? [rollItem(Math.max(depth, K.floor))] : [];
+  const total = lumps + gear.length;
+  let seat = 0;
+  for (let i = 0; i < lumps; i++) {
+    const s = spill(ch.x, ch.y, lumps, seat++, total);
+    loot.push({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, value: worth,
+                r: 6, spin: Math.random() * TAU, life: 0, pulled: false });
+  }
   // Gear lands on the floor as an ordinary drop, so a full bag behaves the
   // same way here as it does everywhere else rather than silently eating it.
-  if (Math.random() < K.gear * DIFF.lootRate) {
-    const it = rollItem(Math.max(depth, K.floor));
-    drops.push({ x: ch.x + rand(-10, 10), y: ch.y + rand(-10, 10),
-                 vx: rand(-40, 40), vy: rand(-40, 40),
+  for (const it of gear) {
+    const s = spill(ch.x, ch.y, 1, seat++, total);
+    drops.push({ x: s.x, y: s.y, vx: s.vx, vy: s.vy,
                  item: it, r: 9, life: 0, pulled: false });
-    toast(K.name + ' — ' + it.name, rarityOf(it).colour);
-  } else {
-    toast(K.name + ' — ' + coin + ' coin', K.colour);
   }
+  toast(gear.length ? K.name + ' \u2014 ' + gear[0].name
+                    : K.name + ' \u2014 ' + coin + ' coin',
+        gear.length ? rarityOf(gear[0]).colour : K.colour);
 }
 
 function updateChests(dt) {
@@ -2763,6 +3252,156 @@ const CHEST_DRAW = 48;
    -------------------------------------------------------------------- */
 const HAZARD_TICK = 0.4;   // how often standing in one costs you
 let hazards = [];
+
+/* --- TRAPS ----------------------------------------------------------------
+   Ground the ROOM keeps, as opposed to ground the Riftborn leaves. A hazard is
+   spent and gone; a trap is a permanent property of a place, and that is the
+   difference that makes it terrain you can use rather than weather you endure.
+
+   THE POINT OF THEM IS THAT THEY CUT BOTH WAYS. A trap only the player can
+   step in is a tax; a trap the horde can be put into is a weapon, and it is
+   the one weapon this game's controls can express without another button --
+   you already choose where you stand, and the Anchoring Strike already throws
+   what it hits. The bash and the spikes were built months apart and turn out
+   to be the same move.
+
+   Two, each cut to the room that already exists:
+
+     SPIKES in the pillared hall. Plates on a checkerboard, so half the floor
+     is always safe and the room is a question about footing rather than a
+     place you leave. They tell before they come, because a trap with no tell
+     is a dice roll.
+
+     A POOL in the cistern, which dressRooms deliberately leaves bare. Standing
+     water that was never only water.
+
+   Boss-left hazards stay player-only: the Deceiver poisoning his own horde
+   would read as the arena helping you, and his fight is not that fight.
+   ---------------------------------------------------------------------- */
+let traps = [];
+const SPIKE_CYCLE = 3.4;    // the whole beat, at the mouth of the ladder
+const SPIKE_FLOOR = 2.6;    // ...and at the bottom of it
+const SPIKE_TELL  = 0.7;    // stone grinding, before anything is out
+const SPIKE_OUT   = 1.0;    // and how long they stand
+const SPIKE_BITE  = 0.34;   // share of what stands on them -- a HEAVY blow
+const SPIKE_TOLL  = 0.12;   // ...but a gentler share of the hero
+const POOL_DPS    = 0.11;   // share of max life a second, both sides
+const TRAP_TICK   = 0.35;
+
+/* How fast a field beats, by how deep the delve is. Stated as the two ends
+ * rather than as a multiplier, because the number that matters is neither of
+ * them -- it is what is left over.
+ *
+ * The tell and the standing are FIXED: 0.7s of stone grinding and 1.0s of
+ * spikes, at every rung. They are the part the player reads and the part they
+ * have to be out of, and shortening either turns a trap you answer into a
+ * trap you gamble on. So the whole 0.8s the beat loses comes out of the rest
+ * between risings, which runs 1.7s at the mouth down to 0.9s at the bottom.
+ *
+ * That is the honest ceiling on this lever, and it is why the floor is 2.6
+ * and not lower: at 2.4 the rest is half a second, which is less than it
+ * takes to cross a plate, and the checkerboard stops being "half the floor is
+ * safe" and becomes "the room is closed". A hall you cannot cross is not a
+ * harder hall, it is a wall with a hole in the map behind it.
+ */
+const spikeBeat = d => SPIKE_CYCLE + (SPIKE_FLOOR - SPIKE_CYCLE) * clamp(d, 0, 1);
+
+// Which phase a spike field is in. One function so the drawing and the damage
+// cannot disagree about whether the spikes are out -- they did, in the first
+// version, by a frame. The beat is passed in rather than read from the
+// constant for exactly that reason: once it varies by delve, a caller that
+// forgot it would be a renderer drawing one rhythm over another one's damage.
+// It comes off the trap itself, so there is one copy of it per field and no
+// way for two readers to compute it differently.
+function spikePhase(t, cycle) {
+  const c = cycle || SPIKE_CYCLE;
+  const u = t % c;
+  if (u < c - SPIKE_OUT - SPIKE_TELL) return { phase: 'down', f: 0 };
+  if (u < c - SPIKE_OUT)
+    return { phase: 'tell', f: (u - (c - SPIKE_OUT - SPIKE_TELL)) / SPIKE_TELL };
+  return { phase: 'out', f: (u - (c - SPIKE_OUT)) / SPIKE_OUT };
+}
+// A plate, or the floor between them. Parity on the cell, so it is a
+// checkerboard however the room is shaped and costs one modulo to ask.
+const onPlate = (x, y) =>
+  ((Math.floor(x / CELL_W) + Math.floor(y / CELL_W)) & 1) === 0;
+
+/* Who the floor is allowed to touch. The horde, and only the horde.
+ *
+ * The avatar and his escort are excluded because his fight has one rule --
+ * break the Lieutenants to reach him -- and a spike field under them breaks it
+ * for you. Parking him on a trap is not a tactic, it is a way of not having
+ * the encounter. It also broke deceiver.js, which found his escort ground down
+ * by the room before the cleave it was measuring could land.
+ *
+ * And nothing asleep: damageEnemy wakes what it hits and the alert chains, so
+ * a field over a dormant pack roused it and then roused its neighbours.
+ */
+const trapBites = e => e.hp > 0 && e.awake &&
+                       !isAvatar(e) && e.kind !== 'lieutenant';
+
+function placeTraps() {
+  traps = [];
+  for (const rm of rooms) {
+    if (rm.kind === 'hall') {
+      const cycle = spikeBeat(LEVEL.depth || 0);
+      traps.push({ kind: 'spike', x: rm.x, y: rm.y, r: rm.r, cycle: cycle,
+                   // Offset so two halls in one delve are not in lockstep.
+                   t: Math.random() * cycle, was: 'down', bit: [] });
+    } else if (rm.kind === 'cistern') {
+      traps.push({ kind: 'pool', x: rm.x, y: rm.y, r: Math.max(70, rm.r * 0.62),
+                   t: Math.random() * 6, tick: 0 });
+    }
+  }
+}
+
+function updateTraps(dt) {
+  for (let i = 0; i < traps.length; i++) {
+    const tr = traps[i];
+    tr.t += dt;
+    if (tr.kind === 'spike') {
+      const ph = spikePhase(tr.t, tr.cycle).phase;
+      // Only on the EDGE into 'out', and only once per body per rising. A
+      // per-tick spike field would grind everything in the room to nothing
+      // while it stood, which is not a trap, it is a floor that kills.
+      if (ph === 'out' && tr.was !== 'out') {
+        tr.bit = [];
+        if (dist2(player.x, player.y, tr.x, tr.y) < tr.r * tr.r &&
+            onPlate(player.x, player.y)) {
+          const was = player.invuln; player.invuln = 0;
+          hurtPlayerBy(player.maxHp * SPIKE_TOLL, tr.x, tr.y, true);
+          player.invuln = Math.max(player.invuln, was);
+        }
+        enemyGrid.query(tr.x, tr.y, tr.r, _near);
+        for (let k = 0; k < _near.length; k++) {
+          const e = _near[k];
+          if (!trapBites(e) || !onPlate(e.x, e.y)) continue;
+          if (dist2(e.x, e.y, tr.x, tr.y) > tr.r * tr.r) continue;
+          // From below, so the recoil the weight pass rides has nowhere
+          // sideways to go and the body simply drops where it stood.
+          damageEnemy(e, e.maxHp * SPIKE_BITE, e.x, e.y);
+        }
+      }
+      tr.was = ph;
+    } else {
+      tr.tick -= dt;
+      if (tr.tick > 0) continue;
+      tr.tick = TRAP_TICK;
+      if (dist2(player.x, player.y, tr.x, tr.y) < tr.r * tr.r) {
+        const was = player.invuln; player.invuln = 0;
+        hurtPlayerBy(player.maxHp * POOL_DPS * TRAP_TICK, tr.x, tr.y, true);
+        player.invuln = Math.max(player.invuln, was);
+      }
+      enemyGrid.query(tr.x, tr.y, tr.r, _near);
+      for (let k = 0; k < _near.length; k++) {
+        const e = _near[k];
+        if (!trapBites(e)) continue;
+        if (dist2(e.x, e.y, tr.x, tr.y) > tr.r * tr.r) continue;
+        damageEnemy(e, e.maxHp * POOL_DPS * TRAP_TICK, e.x, e.y);
+      }
+    }
+  }
+}
 
 /* --- reactive scenery -----------------------------------------------------
    The player has a stick and an automatic blade, so the only tactical input
@@ -2805,15 +3444,35 @@ function blastAt(x, y, r, dmg, hue, pierce) {
     if (e.hp <= 0) continue;
     const d = Math.hypot(e.x - x, e.y - y);
     if (d > r + e.r) continue;
-    damageEnemy(e, dmg * (1 - Math.min(0.6, d / (r * 2))));
+    damageEnemy(e, dmg * (1 - Math.min(0.6, d / (r * 2))), x, y);
   }
-  if (dist2(player.x, player.y, x, y) < r * r) {
+  /* The hero gets the same falloff the horde gets, and until now did not.
+   *
+   * A body took between 0.4 and 1.0 of the blast by how far out it stood; the
+   * hero took a flat 0.4 anywhere inside the radius, so the very edge of a
+   * barrel cost exactly what the middle of it did. That is backwards for the
+   * one piece of scenery whose whole design is "a thing you aim at by standing
+   * somewhere" -- there was no somewhere. Setting one off and stepping back
+   * was worth nothing, so the correct play and the careless one were priced
+   * the same.
+   *
+   * Measured: bursts were 52% of everything that killed the reference player
+   * at rung 3 and 26% at rung 9 -- the largest single cause of the cliff at
+   * the end of the teaching ramp, ahead of the entire horde put together.
+   *
+   * A direct hit is unchanged. The floor of 0.35 is so that a blast is never
+   * free to walk through, only cheap to be at the edge of.
+   */
+  const pr2 = dist2(player.x, player.y, x, y);
+  if (pr2 < r * r) {
+    const near = 0.35 + 0.65 * (1 - clamp(Math.sqrt(pr2) / r, 0, 1));
+    const toll = dmg * 0.4 * near;
     if (pierce === false) {
-      hurtPlayerBy(dmg * 0.4, x, y);
+      hurtPlayerBy(toll, x, y);
     } else {
       const was = player.invuln;
       player.invuln = 0;
-      hurtPlayerBy(dmg * 0.4, x, y);
+      hurtPlayerBy(toll, x, y);
       player.invuln = Math.max(player.invuln, was);
     }
   }
@@ -2857,9 +3516,9 @@ function hurtPropsNear(x, y, r, dmg) {
   }
 }
 
-function addHazard(x, y, r, dps, life, hue) {
+function addHazard(x, y, r, dps, life, hue, sized) {
   if (hazards.length > 40) hazards.shift();
-  hazards.push({ x, y, r, dps, life, max: life, tick: 0,
+  hazards.push({ x, y, r, dps, life, max: life, tick: 0, sized: !!sized,
                  hue: hue || '#b07cff', wob: Math.random() * TAU });
 }
 
@@ -2877,7 +3536,7 @@ function updateHazards(dt) {
       // also touching you.
       const was = player.invuln;
       player.invuln = 0;
-      hurtPlayerBy(h.dps * HAZARD_TICK, h.x, h.y);
+      hurtPlayerBy(h.dps * HAZARD_TICK, h.x, h.y, h.sized);
       player.invuln = Math.max(player.invuln, was);
     }
   }
@@ -2916,7 +3575,7 @@ function updateSlams(dt) {
         // came down on stays broken and burning, so the corridor it chose is
         // a corridor you now have to go round.
         if (s.fracture) {
-          addHazard(s.x, s.y, s.r * 0.72, FRACTURE_DPS, FRACTURE_LIFE, '#e0402c');
+          addHazard(s.x, s.y, s.r * 0.72, FRACTURE_DPS, linger(FRACTURE_LIFE), '#e0402c', lingered);
           for (let k = 0; k < 6; k++) {
             props.push({ x: s.x + rand(-s.r * 0.7, s.r * 0.7),
                          y: s.y + rand(-s.r * 0.5, s.r * 0.5),
@@ -3120,9 +3779,14 @@ const VULN_MULT  = 5;      // and what the Guillotine does to a body under it
 
 const ABILITIES = {
   isaac: [
+    // THE BLOW. Not a poke on the way to the real abilities: it is where a
+    // Hearth-Warden's damage comes from now, and it is on a shorter beat than
+    // everything else on the bar so pressing it is a rhythm rather than a
+    // once-a-second decision you make between other decisions. Sixty-two units
+    // was inside a thrall's own swing; ninety-six is a step, not a hug.
     { id: 'anchor', name: 'Anchoring Strike', mark: '✦',
-      note: 'A shield bash, close enough to touch. Builds a Charge.',
-      cd: 0, gcd: 1, build: 1, reach: 62, dmg: 2.4 },
+      note: 'A shield bash that breaks a guard. Builds a Charge.',
+      cd: 0, gcd: 0.8, build: 1, reach: 96, dmg: 3.4 },
     { id: 'aegis', name: 'Aegis of Tor-Varden', mark: '◉',
       note: 'Spends three. A ring of Sun-Gold, and a moment behind the guard.',
       cd: 0, gcd: 1, cost: CHARGE_MAX, radius: 150, dmg: 3.2, mitigate: 2 },
@@ -3137,9 +3801,12 @@ const ABILITIES = {
       cd: 0, gcd: 1.25, cost: CHARGE_MAX, reach: 96, dmg: 7 }
   ],
   zayd: [
+    // Zayd's is the same decision in his own idiom: a line rather than a bash,
+    // and it stays a line -- three hundred and forty units of it, through
+    // everything standing in the way. Same shorter beat, same reason.
     { id: 'truth', name: 'Piercing Truth', mark: '↠',
       note: 'A line of Azure through everything standing in it. Builds Tension.',
-      cd: 0, gcd: 1, build: 14, reach: 340, dmg: 1.5 },
+      cd: 0, gcd: 0.8, build: 14, reach: 340, dmg: 2.2 },
     { id: 'nullzone', name: 'Null-Zone Eruption', mark: '◍',
       note: 'Spends two fifths. A pool that slows what stands in it and eats what it is casting.',
       cd: 0, gcd: 1, costPct: 0.40, radius: 96, life: 7 },
@@ -3211,10 +3878,21 @@ const ABILITY_DO = {
     player.angle = Math.atan2(t.y - player.y, t.x - player.x);
     if (Math.abs(Math.cos(player.angle)) > 0.25)
       player.face = Math.cos(player.angle) < 0 ? -1 : 1;
-    damageEnemy(t, player.damage * a.dmg);
-    knock(t, player.angle, 200);
-    freeze(0.03);
-    shake(5);
+    // It breaks a guard. An anchor braces on a rhythm and eats most of what
+    // lands while it does, and the answer used to be only "wait" -- which is
+    // an answer, but it is the one the player was already giving. A shield
+    // bash is the other answer, and it is the reason to walk INTO the thing
+    // rather than round it.
+    const guarded = !!t.braced;
+    if (guarded) {
+      t.braced = false;
+      toast('Guard broken', '#ffd870');
+      ring(t.x, t.y, '#ffe6a8', 5, 58, 0.3);
+    }
+    damageEnemy(t, player.damage * a.dmg, player.x, player.y);
+    knock(t, player.angle, guarded ? 420 : 300);
+    freeze(guarded ? 0.05 : 0.04);
+    shake(guarded ? 8 : 6);
     burst(t.x, t.y, '#ffd870', 10, 190);
     ring(t.x, t.y, '#ffd870', 6, 44, 0.26);
     gainCharge(a.build);
@@ -3231,7 +3909,7 @@ const ABILITY_DO = {
       const e = _near[i];
       if (e.hp <= 0) continue;
       if (dist2(player.x, player.y, e.x, e.y) > a.radius * a.radius) continue;
-      damageEnemy(e, player.damage * a.dmg);
+      damageEnemy(e, player.damage * a.dmg, player.x, player.y);
       knock(e, Math.atan2(e.y - player.y, e.x - player.x), 240);
     }
     player.mitigate = a.mitigate;
@@ -3264,7 +3942,7 @@ const ABILITY_DO = {
     shake(vuln ? 16 : 11);
     ring(t.x, t.y, vuln ? '#fff2c8' : '#ffd870', 8, vuln ? 190 : 120, 0.5);
     burst(t.x, t.y, '#fff2c8', vuln ? 40 : 22, 380);
-    damageEnemy(t, player.damage * a.dmg * (vuln ? VULN_MULT : 1));
+    damageEnemy(t, player.damage * a.dmg * (vuln ? VULN_MULT : 1), player.x, player.y);
     if (vuln) toast('The guard is broken', '#fff2c8');
   },
 
@@ -3285,7 +3963,7 @@ const ABILITY_DO = {
       // struck rather than only what the beam's centre passes through.
       if (segDist(player.x, player.y, ex, ey, e.x, e.y) > e.r + 10) continue;
       if (!clearShot(player.x, player.y, e.x, e.y)) continue;
-      damageEnemy(e, player.damage * a.dmg);
+      damageEnemy(e, player.damage * a.dmg, player.x, player.y);
       burst(e.x, e.y, '#5fd0ff', 6, 150);
       hits++;
     }
@@ -3442,6 +4120,11 @@ function nearestBody(R) {
 // move at all -- it is the whole of what an anchor is.
 function knock(e, ang, force) {
   if (!e || e.hp <= 0) return;
+  // The Anchor. Stated rather than left to fall out of a large mass, because
+  // "it cannot be relocated" is a rule of the encounter and not a consequence
+  // of a number somebody may retune. The Anchoring Strike still BREAKS its
+  // guard and still lands its damage -- what it does not do is move it.
+  if (e.anchored) return;
   const f = force / Math.max(0.6, e.mass || 1);
   moveEntity(e, Math.cos(ang) * f * 0.05, Math.sin(ang) * f * 0.05);
 }
@@ -3695,12 +4378,54 @@ function hurtPlayer(e) { hurtPlayerBy(e.dmg, e.x, e.y); }
 
 // Damage from something that is not a body -- a slam, a hazard -- comes
 // through here. fx/fy is only where the spray comes from.
-function hurtPlayerBy(dmg, fx, fy) {
+/* HOW HARD A DELVE HITS, by how deep it is.
+ *
+ * placeEnemy multiplied a body's HEALTH by (1 + depth * 1.6) and its damage by
+ * nothing at all, and neither did any hazard the delve leaves on the floor. So
+ * the deeper you went the safer you were. Measured on the reference player, as
+ * life lost per minute alive against the hero who belongs on that rung:
+ *
+ *     rung   0     3     9    17    30    44
+ *     lives  1.58  1.91  2.36  1.89  0.99  0.54
+ *     life    161   159   195   271   419   553
+ *
+ * The deepest rung was four times safer than the ninth. The hero's life triples
+ * across the ladder and what the delve throws does not move.
+ *
+ * WHY THIS IS SAFE FOR `ward`, which is the reason it was not done sooner. The
+ * worry was that scaling incoming damage would make ward worth less every rung
+ * you carried it. It does not, and the line below is why: ward is applied as
+ * (1 - ward), a SHARE of the blow, not a subtraction from it. Twelve per cent
+ * of a bigger number is still twelve per cent. The comment that used to sit
+ * here called it "flat damage reduction" and that reading is what stalled the
+ * fix; the code has always been proportional.
+ *
+ * The term MIRRORS the health term deliberately -- same 1.6, same shape -- so
+ * the rule is one a reader can hold: a body's health and its bite scale
+ * together. One of them scaling alone is how this happened.
+ *
+ * Applied here, at the single door every point of damage comes through, rather
+ * than at the fourteen call sites. "The delve itself" -- hazards, bursts,
+ * broken ground, a slam thrown by something already dead -- is 45 to 64 per
+ * cent of what actually kills the reference player at every rung past the
+ * first, so a term on enemy damage alone would have moved less than half of it.
+ */
+const DELVE_BITE = 1.6;
+const delveBite = () => 1 + (LEVEL.depth || 0) * DELVE_BITE;
+
+/* `sized` marks a blow depth has already been applied to, for either of two
+ * reasons: the traps take a percentage of MAX LIFE, so they track the hero
+ * without help; and anything lingered has had its CLOCK stretched instead, so
+ * scaling the tick as well would multiply the two. Both must be excused here
+ * or they are counted twice.
+ */
+function hurtPlayerBy(dmg, fx, fy, sized) {
   if (player.invuln > 0) return;
-  // Ward is flat damage reduction off gear, capped well short of immunity.
+  // Ward is a SHARE off every blow, not a subtraction: see delveBite above.
   // Mitigation is the kit's own, on top of it and for a few seconds only.
   const mit = (player.mitigate || 0) > 0 ? 0.5 : 0;
-  const taken = dmg * (1 - (player.ward || 0)) * (1 - mit);
+  const taken = dmg * (sized ? 1 : delveBite()) *
+                (1 - (player.ward || 0)) * (1 - mit);
   breakChannel('hurt');
   player.hp -= taken;
   player.invuln = player.iframe;
@@ -3717,7 +4442,42 @@ function hurtPlayerBy(dmg, fx, fy) {
   if (player.hp <= 0) { player.hp = 0; endRun(false); }
 }
 
-function damageEnemy(e, dmg) {
+/* --- WEIGHT ----------------------------------------------------------------
+   Measured, and it is why the fight felt weightless. Every freeze() and
+   shake() in this file sat inside an ability handler; damageEnemy -- the one
+   path the ordinary swing travels down, and 55 of the hero's 60 dps in a
+   measured delve -- did a hit-flash, a damage number and two particles, and
+   nothing else. No recoil, no camera, no hit-stop. The blow you land all the
+   time was the only blow with nothing behind it.
+
+   Given back here rather than at the call sites, because the call sites are
+   the crescent, five abilities, a husk going off and a shattering calcify,
+   and all of them are blows landing on a body.
+
+   Scaled by the SHARE OF THE BODY the blow took, not by the number: twenty-two
+   off a thrall is most of it and off the avatar it is a scratch, and they must
+   not land alike. Mass divides the recoil on top, so the same crescent throws
+   a thrall and barely turns a gorger.
+
+   ON THE HIT-STOP. It is spent on the KILL and not on the hit. At the measured
+   rate -- two and a half landings a second against about four fifths of a kill
+   -- a freeze per landing is a stutter you feel as a bad frame rate, where a
+   freeze per kill is punctuation. Same reasoning as HITSTOP_MAX: the pause has
+   to punctuate the fight, not stall it.
+   ------------------------------------------------------------------------ */
+const HIT_KNOCK   = 190;    // recoil on a blow that takes the whole body
+const HIT_SHAKE   = 3.2;    // ...and the camera, above HEAVY_HIT only
+const HEAVY_HIT   = 0.34;   // the floater's own threshold for calling one heavy
+const KILL_FREEZE = 0.045;  // the beat a body breaking is worth
+const KILL_SHAKE  = 4;
+
+/* `fx, fy` is where the blow came FROM, and it is the only reason this takes
+ * more than a body and a number: a recoil has to go somewhere, and guessing
+ * "away from the player" would be wrong for a hazard underfoot, a totem, or a
+ * blade swung past. Every caller knows its own source -- the blast centre, the
+ * arc's position, the hero -- so each one says. Omitted, the body still flashes
+ * and simply does not flinch. */
+function damageEnemy(e, dmg, fx, fy) {
   if (e.hp <= 0) return;
   if (!e.awake) wakeEnemy(e);          // struck from the dark: everyone hears
   // He is held up by his escort. Hitting him through it is not forbidden, just
@@ -3745,6 +4505,22 @@ function damageEnemy(e, dmg) {
   }
   e.hp -= dmg;
   e.hitFlash = 0.12;
+  // The direction the blow travelled, as a unit vector, for the recoil to ride.
+  // A blow landing exactly on a body's own centre has no direction to give, so
+  // the flinch keeps whichever it had rather than snapping to due east.
+  if (fx !== undefined) {
+    const dx = e.x - fx, dy = e.y - fy, m = Math.hypot(dx, dy);
+    if (m > 0.001) { e.hitX = dx / m; e.hitY = dy / m; }
+  }
+  // What share of this body the blow just took. Everything below is scaled by
+  // it, so the same swing reads as a killing blow on a thrall and as a
+  // scratch on the avatar.
+  const weight = clamp(dmg / Math.max(1, e.maxHp), 0, 1);
+  // The recoil. A braced anchor does not take one -- it cannot move or swing
+  // while the guard is up, and that is the whole of why backing off is the
+  // answer to it; pushing it around would say the opposite.
+  if (!e.braced && e.hitX !== undefined)
+    knock(e, Math.atan2(e.hitY, e.hitX), HIT_KNOCK * (0.3 + weight));
   // A heavy enough blow shatters a body that is closing. A scratch does not:
   // the point is that you have to commit to stopping it, not graze it once.
   if (e.calcify > 0 && dmg >= e.maxHp * CALCIFY_BREAK) breakCalcify(e, true);
@@ -3771,6 +4547,18 @@ function damageEnemy(e, dmg) {
     if (e.kind === 'mirage') {
       burst(e.x, e.y, '#e8c060', 10, 150);
       return;                                   // a lie, not a body
+    }
+    if (e.kind === 'crucible') {
+      run.bossDown = true;
+      run.boss = null;
+      run.banner = 3.4;
+      run.bannerText = 'The ley-gate answers';
+      run.bannerNote = 'The forge is out. Hold the circle.';
+      // It goes out rather than falls over: the ring it was standing in is
+      // the last thing on the floor, and it burns down on its own clock.
+      burst(e.x, e.y, '#ff5a24', 46, 340);
+      ring(e.x, e.y, '#ff5a24', 20, FURNACE_R, 0.7);
+      shake(16);
     }
     if (e.kind === 'deceiver') {
       // An invader is not the avatar the delve is waiting on. Killing him must
@@ -3812,10 +4600,19 @@ function damageEnemy(e, dmg) {
       }
     }
     dropLoot(e);
-    burst(e.x, e.y, e.color, e.r > 18 ? 14 : 7, 190);
-    if (e.r > 18) shake(3);
+    // The beat. A big body is worth a longer one, and the ring gives the
+    // break an edge that expands rather than a puff that fades.
+    const big = e.r > 18;
+    freeze(KILL_FREEZE * (big ? 1.6 : 1));
+    shake(KILL_SHAKE * (big ? 2 : 1));
+    burst(e.x, e.y, e.color, big ? 18 : 10, 210);
+    ring(e.x, e.y, e.color, 3, e.r * 2.4, 0.22);
   } else {
-    burst(e.x, e.y, '#e6d8bc', 2, 90);
+    // A landing that did not kill still has to look like one. The spray grows
+    // with the share it took; the camera only answers a heavy one, or a fight
+    // against thralls -- which die in two -- would never let it settle.
+    burst(e.x, e.y, '#e6d8bc', 2 + ((weight * 6) | 0), 90 + weight * 150);
+    if (weight >= HEAVY_HIT) shake(HIT_SHAKE * weight);
   }
 }
 
@@ -3985,7 +4782,7 @@ function updateEnemies(dt) {
     // Heavy bodies break off when they are nearly down. Once each: a champion
     // that can keep retreating is a champion that never dies.
     if (e.awake && !e.calcified && (e.mass || 1) >= 2.5 && e.hp > 0 &&
-        e.hp < e.maxHp * CALCIFY_AT && e.kind !== 'deceiver' && !e.invader) {
+        e.hp < e.maxHp * CALCIFY_AT && !isAvatar(e) && !e.invader) {
       beginCalcify(e);
       continue;
     }
@@ -4010,6 +4807,9 @@ function updateEnemies(dt) {
     if (e.kind === 'mirage') {
       e.fade -= dt;
       if (e.fade <= 0) { e.hp = 0; continue; }
+    } else if (e.kind === 'crucible') {
+      updateCrucible(e, dt);
+      continue;
     } else if (e.kind === 'deceiver') {
       // Nullified. Ten seconds on the floor with the guard down, which is the
       // only stretch of this fight where his health bar is the thing moving.
@@ -4239,7 +5039,7 @@ function updateEnemies(dt) {
         if (!e.struck && d < e.r + player.r + 8) {
           e.struck = true;
           hurtPlayer(e);
-          openWound(BLEED_DPS, BLEED_TIME);
+          openWound(BLEED_DPS, linger(BLEED_TIME), lingered);
           burst(player.x, player.y, PAL.blood, 12, 200);
         }
         if (e.run <= 0) { e.lurk = STALK_BACK * rand(0.8, 1.35); e.struck = false; }
@@ -4267,9 +5067,17 @@ function updateEnemies(dt) {
       if (e.chanting > 0) {
         e.chanting -= dt;
         if (e.chanting <= 0) {
-          if (clear) {
+          // A tender is one the Crucible-Mass called, and it has one job: the
+          // totem at its own feet. It does not throw fire, it does not take
+          // the light, and it does not need a line to the player to do any of
+          // that -- it is not fighting you, it is mending the thing you came
+          // for, which is why cutting it is the errand and not the fight.
+          if (e.tender) {
+            plantTotem(e.x, e.y, true);
+            e.chant = e.cd * rand(1.6, 2.2);
+          } else if (clear) {
             if (e.spell === 0) {
-              addHazard(player.x, player.y, EMBER_R, EMBER_DPS, EMBER_LIFE, '#ff7a2c');
+              addHazard(player.x, player.y, EMBER_R, EMBER_DPS, linger(EMBER_LIFE), '#ff7a2c', lingered);
               ring(player.x, player.y, '#ff7a2c', EMBER_R * 0.3, EMBER_R, 0.4);
             } else if (e.spell === 1) {
               castGloom();
@@ -4280,15 +5088,25 @@ function updateEnemies(dt) {
               plantTotem(e.x, e.y);
             }
           }
-          e.chant = e.cd * rand(0.85, 1.3);
-          // Fire, then the dark, then a totem, and round again -- so none of
-          // the three is ever a surprise twice running.
-          e.spell = (e.spell + 1) % 3;
+          if (!e.tender) {
+            e.chant = e.cd * rand(0.85, 1.3);
+            // Fire, then the dark, then a totem, and round again -- so none of
+            // the three is ever a surprise twice running.
+            e.spell = (e.spell + 1) % 3;
+          }
         }
         chant = 2;
       } else {
         e.chant -= dt;
-        if (e.chant <= 0 && clear && d < CHANT_WANT * 1.3) { e.chanting = CHANT_WIND; chant = 2; }
+        // A tender holds the post it was called to and casts on its own clock.
+        // Everything below this line is a shaman deciding where to stand
+        // relative to the player, and a tender has already been told where to
+        // stand: in the ring, where reaching it costs something.
+        if (e.tender) {
+          if (e.chant <= 0) e.chanting = CHANT_WIND;
+          chant = 2;
+        }
+        else if (e.chant <= 0 && clear && d < CHANT_WANT * 1.3) { e.chanting = CHANT_WIND; chant = 2; }
         else if (d < CHANT_WANT * 0.55) chant = -1;
         else if (d > CHANT_WANT || !clear) chant = 1;
         else chant = 2;
@@ -4457,7 +5275,7 @@ function updateArcs(dt) {
         const e = _near[k];
         if (e.hp <= 0 || b.hit.indexOf(e) !== -1) continue;
         if (!inCrescent(b, e)) continue;
-        damageEnemy(e, b.dmg);
+        damageEnemy(e, b.dmg, b.x, b.y);
         b.hit.push(e);
       }
       // A totem is a thing standing on the floor and the blade cuts it like
@@ -4629,12 +5447,189 @@ function updateInvasion(dt) {
 
 function spawnBoss() {
   if (!LEVEL.boss) { run.bossDown = true; return; }
-  if (LEVEL.boss === 'deceiver') spawnDeceiver();
+  if (LEVEL.boss === 'crucible') spawnCrucible();
+  else spawnDeceiver();
+}
+
+/* The Crucible-Mass arrives at the gate the same way the avatar does, and
+ * then never moves again. Everything about the encounter follows from that:
+ * it has no approach, no pursuit and no escape, so the only variables in the
+ * fight are where the fire is and where the totems are.
+ */
+function spawnCrucible() {
+  const d = ENEMY_TYPES.crucible;
+  /* Where it stands, and it matters more than it does for anything else in
+   * the game, because it never moves again and it throws a ring 250 units
+   * across.
+   *
+   * ROOM FOR THE RING FIRST. The Furnace drops any block that would land off
+   * the map, so a Crucible-Mass parked near an edge has a permanently safe
+   * quadrant -- stand due east of one at x=1781 in a 2000-wide world and it
+   * can never touch you, for the whole fight. Measured: the arena fixture
+   * caught it as a hero taking zero damage over twenty-five seconds on the
+   * ring. So the preferred centre is pulled into the band where a whole ring
+   * fits, and only then is ground looked for near it.
+   *
+   * It still stands AT the gate -- the pull is at most a couple of hundred
+   * units and only ever when the gate is in a corner -- and it still settles
+   * for the gate itself rather than failing to place, because a boss that did
+   * not spawn would hang the delve at the quota with nothing to kill.
+   */
+  const room = FURNACE_R + 40;
+  const wantX = clamp(portal.x, Math.min(room, WORLD.w / 2), Math.max(room, WORLD.w - room));
+  const wantY = clamp(portal.y, Math.min(room, WORLD.h / 2), Math.max(room, WORLD.h - room));
+  // The search is held inside the same band. Clamping only to the world's own
+  // margin let it walk straight back out to the edge it was just pulled in
+  // from -- the sweep reaches 273 units, which is more than the pull -- and
+  // the suite caught a boss at y=1774 with six blocks of seven.
+  const loX = Math.min(room, WORLD.w / 2), hiX = Math.max(room, WORLD.w - room);
+  const loY = Math.min(room, WORLD.h / 2), hiY = Math.max(room, WORLD.h - room);
+  let x = wantX, y = wantY;
+  for (let k = 0; k < 40; k++) {
+    const a = Math.random() * TAU, dd = k * 7;
+    const nx = clamp(wantX + Math.cos(a) * dd, loX, hiX);
+    const ny = clamp(wantY + Math.sin(a) * dd, loY, hiY);
+    if (!pointInWalls(nx, ny, d.r + 4)) { x = nx; y = ny; break; }
+  }
+  const e = newBody('crucible', x, y, 0);
+  const dep = LEVEL.depth || 0;
+  e.hp = e.maxHp = d.hp * (1 + dep * 1.6) * DIFF.threat;
+  e.dmg = d.dmg * DIFF.threat;
+  e.speed = 0;
+  e.anchored = true;
+  e.furnace = FURNACE_CD * 0.5;   // the first ring comes early, to teach it
+  e.call = 2.0;
+  e.spin = Math.random() < 0.5 ? -1 : 1;
+  enemies.push(e);
+  run.boss = e;
+  e.title = 'The Crucible-Mass';
+  run.bossTitle = e.title;
+  run.banner = 3.8;
+  run.bannerText = e.title;
+  run.bannerNote = 'It cannot follow you. Its totems can mend it.';
+  shake(10);
+}
+
+/* Rooted, burning, and mending. Three clocks and nothing else -- it has no
+ * approach to steer and no target to choose, so none of the seek, flock or
+ * role code below applies to it and this returns rather than falling through.
+ */
+function updateCrucible(e, dt) {
+  const dx = player.x - e.x, dy = player.y - e.y;
+  const d = Math.hypot(dx, dy) || 1;
+  e.angle = Math.atan2(dy, dx);
+  if (Math.abs(dx) > 3) e.face = dx < 0 ? -1 : 1;
+  e.pace = 0;                                   // it never walks, so it never gaits
+
+  // --- mending -----------------------------------------------------------
+  // Its own totems only: a shaman's totem out in the horde is not part of
+  // this fight, and healing it from across the delve would make the errand
+  // unreadable -- you would cut a totem and see nothing change.
+  let tending = 0;
+  for (let i = 0; i < totems.length; i++) {
+    if (!totems[i].tender) continue;
+    if (dist2(totems[i].x, totems[i].y, e.x, e.y) < CRUCIBLE_TEND * CRUCIBLE_TEND)
+      tending++;
+  }
+  e.tended = tending;
+  if (tending > 0 && e.hp > 0 && e.hp < e.maxHp) {
+    e.hp = Math.min(e.maxHp, e.hp + e.maxHp * CRUCIBLE_MEND * tending * dt);
+    if (!lowFx && Math.random() < 0.5 * tending)
+      spark(e.x + rand(-50, 50), e.y + rand(-50, 50), e.x, e.y, '#9dbb5a');
+  }
+
+  // --- the escort --------------------------------------------------------
+  // Shamans, not Lieutenants. They are called in at the ring rather than on
+  // top of it, so the walk out to a totem is a walk through the fire and not
+  // a step to one side.
+  e.call -= dt;
+  if (e.call <= 0) {
+    e.call = CRUCIBLE_CALL;
+    // Its own, by the flag and not by distance: an ordinary shaman that has
+    // wandered in from the horde is not part of this fight, and counting one
+    // would stop the boss calling the escort it is owed.
+    let live = 0;
+    for (let i = 0; i < enemies.length; i++)
+      if (enemies[i].tender && enemies[i].hp > 0) live++;
+    if (live < CRUCIBLE_KEEP) {
+      for (let k = 0; k < 24; k++) {
+        // ON the ring, not outside it. The block the Furnace throws is 96
+        // across, so a band from 240 to 300 units out is inside the burning
+        // arc and inside CRUCIBLE_TEND both -- which is the whole errand: the
+        // totem that is mending it stands in the fire it is throwing.
+        const a = Math.random() * TAU, dd = FURNACE_R - 10 + Math.random() * 60;
+        const nx = clamp(e.x + Math.cos(a) * dd, 50, WORLD.w - 50);
+        const ny = clamp(e.y + Math.sin(a) * dd, 50, WORLD.h - 50);
+        if (pointInWalls(nx, ny, ENEMY_TYPES.shaman.r + 3)) continue;
+        const sh = newBody('shaman', nx, ny, 0);
+        sh.awake = true;
+        sh.tender = true;
+        // Straight into the wind-up: one that arrives and then waits out its
+        // ordinary cooldown reads as an add rather than as the reason the boss
+        // is not dying.
+        sh.chant = 0.2;
+        enemies.push(sh);
+        burst(nx, ny, '#ff7a2c', 14, 180);
+        break;
+      }
+    }
+  }
+
+  // --- the Furnace -------------------------------------------------------
+  e.furnace -= dt;
+  if (e.furnace <= 0) {
+    e.furnace = FURNACE_CD * rand(0.9, 1.12);
+    // The gaps turn every cast, so the safe arc is somewhere else each time
+    // and standing still in one is not an answer.
+    const off = Math.random() * TAU;
+    for (let i = 0; i < FURNACE_ARC; i++) {
+      const a = off + (i / FURNACE_ARC) * TAU;
+      const bx = e.x + Math.cos(a) * FURNACE_R;
+      const by = e.y + Math.sin(a) * FURNACE_R;
+      // Off the map, or in rock: the ring simply has a hole there. Better
+      // than clamping it inward, which would bunch blocks up against a wall
+      // and close the only gap the room had.
+      if (bx < 30 || by < 30 || bx > WORLD.w - 30 || by > WORLD.h - 30) continue;
+      slams.push({ x: bx, y: by, r: FURNACE_BLOCK, wind: SLAM_WIND * 1.25, t: 0,
+                   dmg: e.dmg * FURNACE_HIT, struck: false, fracture: true });
+    }
+    e.spin = -e.spin;
+    ring(e.x, e.y, '#ff5a24', 20, FURNACE_R, 0.55);
+    shake(5);
+  }
+
+  // --- and it still swings at anything that comes into reach -------------
+  // It cannot chase, so contact is a choice the player made. It has to cost
+  // something or standing in its face while the ring is out would be the
+  // safest square on the floor.
+  e.atk -= dt;
+  if (d < e.r + player.r + 10 && e.atk <= 0) {
+    e.atk = e.cd;
+    hurtPlayerBy(e.dmg, e.x, e.y);
+  }
 }
 
 function spawnDeceiver() {
   const d = ENEMY_TYPES.deceiver;
-  const scale = 1 + run.time / 220;
+  /* The avatar scales with the ladder, and until now did not.
+   *
+   * His health was five hundred and forty at the proving ground and five
+   * hundred and forty at the fifty-second rung, moved only by how long the run
+   * had taken. So he was the same fight against a hero with 149 life and
+   * against one with 662 -- the horde's own defect, in the one body the delve
+   * cannot be finished without.
+   *
+   * Measured, it was the whole of what was wrong with rung 0: the reference
+   * player met that rung's quota nineteen times in twenty-four and got out of
+   * it NONE, because gathering was never the problem and he was. Half at the
+   * mouth, and the same (1 + depth * 1.6) the horde carries after that, so
+   * there is one health rule in the game rather than three.
+   *
+   * His damage needs no term here: delveBite already scales every point the
+   * player takes by depth, and his blows come through the same door.
+   */
+  const dep = LEVEL.depth || 0;
+  const scale = (1 + run.time / 220) * (0.5 + dep * 1.6);
   const e = newBody('deceiver', portal.x, portal.y - 4, 0);
   e.hp = e.maxHp = d.hp * scale;
   e.dmg = d.dmg; e.speed = d.speed; e.atk = 1.4; e.wob = 0;
@@ -4664,7 +5659,8 @@ function spawnDeceiver() {
   // three-hundred-hit-point guards halved the extraction rate on the first
   // delve, where the horde is thirty-four-hit-point thralls and the hero has
   // power four: the fight has to be learnable before it is hard.
-  const dep = LEVEL.depth || 0;
+  // `dep` is the one declared at the top of this function, where his health
+  // is scaled by it -- the escort ramps on the same term for the same reason.
   const guard = (LEVEL.guard >= 0 ? LEVEL.guard : 1 + Math.round(dep * 2)) +
                 e.extraGuard;
   for (let i = 0; i < guard; i++) {
@@ -4877,6 +5873,7 @@ function update(dt) {
   updateProps(dt);
   updateSlams(dt);
   updateHazards(dt);
+  updateTraps(dt);
   updateBeams(dt);
   updateNulls(dt);
   updateTotems(dt);
@@ -4920,6 +5917,73 @@ const STORE_KEY = 'rivenmark.best.v1';
    ---------------------------------------------------------------------- */
 const STASH_KEY = 'rivenmark.stash.v1';
 const VAULT_MAX = 60;
+
+/* --- HARDCORE ------------------------------------------------------------
+   One life. Everything the Vanguard owns goes with them.
+
+   THREE KEYS, and the reason for each. The Hardcore stash is a SECOND key
+   rather than a flag inside the first, because the death hook wipes it and a
+   wipe that has to reach into a shared record and remove exactly the right
+   half is a wipe that will one day take the wrong half. Two keys means the
+   ordinary game is safe by construction rather than by care.
+
+   The flag cannot live in the stash either -- it is what decides which stash
+   to load, so it has to be known before there is one. It is its own tiny
+   record, kept beside the honours.
+
+   And the HONOURS are a third key because they must survive the wipe. A
+   Regalia carried out of a Hardcore delve is the only thing in this game that
+   is permanent whatever happens next, which is the entire point of it: the
+   character dies, the trophy does not.
+   ---------------------------------------------------------------------- */
+const HC_STASH_KEY = 'rivenmark.hc.stash.v1';
+const HC_MODE_KEY  = 'rivenmark.hc.mode.v1';
+const HONOURS_KEY  = 'rivenmark.honours.v1';
+// What one life is worth. Applied to loot and to the Regalia both, on top of
+// whatever the difficulty already says.
+const HC_LOOT = 1.5;
+
+let hardcore = false;
+const stashKey = () => (hardcore ? HC_STASH_KEY : STASH_KEY);
+const lootMult = () => DIFF.lootRate * (hardcore ? HC_LOOT : 1);
+const relicMult = () => DIFF.setRate * (hardcore ? HC_LOOT : 1);
+// The blood-red sweep. Earned once, kept for ever, and worn in either mode --
+// a trophy nobody can see outside the room it was won in is not a trophy.
+const honoured = () => !!loadHonours().crimson;
+// The trophy, worn. A Vanguard who carried the whole Regalia out of one life
+// swings in crimson from then on, in either mode and for ever -- which is what
+// makes it a trophy rather than a line in a menu. Asked here by both builds so
+// they cannot disagree about what colour the blade is.
+const CRIMSON = '#e0563f';
+const crescentHue = heroId =>
+  (honoured() ? CRIMSON : (HEROES[heroId] || HEROES.isaac).magic);
+
+/* Putting one kit down and picking the other up. Nothing is destroyed: the two
+ * stashes are separate keys, so switching is only a matter of which one is
+ * live. Split the same way the wipe is -- the RULE here, the one page-bound
+ * line beside it -- because the core cannot reach localStorage and this must
+ * behave identically in both builds. */
+function setHardcore(on) {
+  if (hardcore === !!on) return;
+  hardcore = !!on;
+  rememberHardcore(hardcore);
+  stash = loadStash();
+  itemSeq = stash.seq || 0;
+}
+
+/* The death hook. Everything goes: the gear, the vault, the coin, the ranks.
+ * Not "reset to base gear" by hand -- blankStash IS base gear, and writing the
+ * wipe as anything other than "start again from nothing" leaves a field
+ * somebody adds later quietly surviving death.
+ *
+ * The honours are not touched, and the corpse is not written: there is nobody
+ * left to come back for it. */
+function wipeHardcore() {
+  dropHardcoreStash();          // the host owns the key; this owns the rule
+  stash = blankStash();
+  itemSeq = 0;
+  saveStash();
+}
 
 /* --- the gate-house -------------------------------------------------------
    Coin was worth exactly three things: a commissioned piece, a temper, and a
@@ -4998,6 +6062,13 @@ function blankStash() {
   for (const sl of SLOTS) g[sl.id] = null;
   return { gear: g, vault: [], hero: 'isaac', seq: 0, xp: 0, level: 1,
            coins: 0, pity: 0, loadouts: [], corpse: null,
+           // Which ground you asked to be cut into. null is "whatever the
+           // rung rolls", which is what it always did.
+           region: null,
+           // The daily. `bounty` records the day it was claimed on, so it can
+           // be taken once; `bountyArmed` is only whether it is picked up
+           // right now, and is deliberately not persisted as an achievement.
+           bounty: null, bountyArmed: false,
            hall: { vault: 0, forge: 0, reliquary: 0, wardstone: 0 } };
 }
 
@@ -5115,10 +6186,14 @@ function spark(x, y, tx, ty, color) {
 /* Resonance Totems. A shaman plants one and the horde standing round it stops
    dying. It has its own life and no defence -- the difficulty is entirely that
    the bodies are in the way, which is what the horde's mass is for. */
-function plantTotem(x, y) {
+function plantTotem(x, y, tender) {
   if (totems.length >= 4) return;
+  // `tender` marks it as the Crucible-Mass's own. Only those mend it -- an
+  // ordinary shaman's totem that happens to be planted near the arena is not
+  // part of that fight, and letting one count would mean cutting every totem
+  // the boss has and watching the bar climb anyway.
   totems.push({ x, y, hp: TOTEM_HP * (1 + (LEVEL.depth || 0)), maxHp: TOTEM_HP * (1 + (LEVEL.depth || 0)),
-                life: TOTEM_LIFE, pulse: 0 });
+                life: TOTEM_LIFE, pulse: 0, tender: !!tender });
   ring(x, y, '#9dbb5a', 8, TOTEM_R, 0.5);
   toast('A totem is planted', '#9dbb5a');
 }
@@ -5145,21 +6220,6 @@ function updateTotems(dt) {
       e.mended = 0.2;
     }
   }
-}
-
-// The blade and everything else hits a totem the way it hits a body. Called
-// from the places that already look for something to damage.
-function hurtTotemsNear(x, y, r, dmg) {
-  let hit = false;
-  for (let i = 0; i < totems.length; i++) {
-    const t = totems[i];
-    if (dist2(x, y, t.x, t.y) > (r + 14) * (r + 14)) continue;
-    t.hp -= dmg;
-    floatDmg(t.x, t.y - 18, dmg, 'hit');
-    burst(t.x, t.y, '#9dbb5a', 4, 120);
-    hit = true;
-  }
-  return hit;
 }
 
 /* Ravenous Consumption. An elite standing over a thrall it did not kill will
@@ -5271,7 +6331,7 @@ function wipeRoom(why) {
   run.bannerText = 'False Dawn';
   run.bannerNote = why || 'The light came up, and it was not the sun.';
   player.invuln = 0;
-  hurtPlayerBy(player.maxHp * 4, player.x, player.y - 200);
+  hurtPlayerBy(player.maxHp * 4, player.x, player.y - 200, true);
 }
 
 // --- Synchronized Agony ----------------------------------------------------
@@ -5638,9 +6698,18 @@ function resetRun(heroId, levelId, diffId) {
   const hero = heroId || (run && run.hero) || 'isaac';
   DIFF = DIFF_BY_ID[diffId || (run && run.diff_id) || DIFF.id] || DIFF_BY_ID.riven;
   LEVEL = LEVEL_BY_ID[levelId || (run && run.level_id) || LEVELS[0].id] || LEVELS[0];
-  // The level decides which regions it can be cut from; the delve rolls one.
+  // The level decides which regions it can be cut from, and the delve rolls
+  // one -- unless you asked for a particular one at the gate-house.
+  //
+  // That choice had to exist before naming a region's Regalia meant anything.
+  // A rung deep enough to reach the Rot-Weald can be cut from five regions,
+  // so "the rings are in the Rot-Weald" was advice you could not act on: you
+  // took the rung you could beat and the game rolled the ground. Asking for
+  // it is the whole of what makes the map worth reading.
   const pool = LEVEL.regions;
-  REGION = REGION_BY_ID[pool[(Math.random() * pool.length) | 0]] || REGIONS[0];
+  const want = stash && stash.region;
+  REGION = REGION_BY_ID[(want && pool.indexOf(want) >= 0 ? want
+                        : pool[(Math.random() * pool.length) | 0])] || REGIONS[0];
   PAL.stoneTop = REGION.stone[0];
   PAL.stoneMid = REGION.stone[1];
   PAL.stoneLow = REGION.stone[2];
@@ -5666,7 +6735,14 @@ function resetRun(heroId, levelId, diffId) {
   ruptures = [];
   enemyGrid = new SpatialHash(ENEMY_CELL);
 
+  // The bounty, if one was taken AND this is the rung it named. Checked here
+  // rather than trusted from the menu: an armed flag left over from yesterday,
+  // or from a different rung, must not quietly twist a delve it was not for.
+  const bty = todaysBounty();
+  const onBounty = !!(stash.bountyArmed && !bountyDone() && LEVEL.id === bty.level_id);
+
   run = { time: 0, tech: 0, kills: 0,
+          bounty: onBounty ? bty : null,
           // Where the one who is not on the ground keeps his wounds. Cleared
           // per run: swapping is not a heal, but a new delve is a new delve.
           pools: {},
@@ -5694,8 +6770,21 @@ function resetRun(heroId, levelId, diffId) {
   cam.shake = 0;
 
   recomputeStats();
+  // ...and go down whole.
+  //
+  // makePlayer fills to the HERO'S OWN maxHp -- Isaac's 125, Zayd's 92 --
+  // because at that point that is all a hero is. recomputeStats then adds the
+  // levels, the Ward-Stone and eight pieces of gear on top, and ends with
+  // `p.hp = Math.min(p.hp, p.maxHp)`, which is there so a +life ring cannot be
+  // swapped in as a free heal. Between them, every point of life ever earned
+  // was life the hero did not have when he stepped in: forty-four rungs down
+  // Isaac descended at 125 of 438, and Zayd at 92 of 405. The clamp is right
+  // where it lives; the start of a delve is simply not a stat recomputation,
+  // it is a hero arriving.
+  player.hp = player.maxHp;
   placePacks(spawn);
   placeChests(spawn, portal);
+  placeTraps();
   flowFrom = -1;
   rebuildFlow();
   hudCache.hp = hudCache.tech = hudCache.time = hudCache.lvl = -1;
@@ -5834,8 +6923,15 @@ function vendorBuy(v, arg) {
     const it = arg && stash.gear[arg];
     if (!it || it.set === SET_ID) return false;      // the Regalia is fixed
     const pool = SLOT_AFFIXES[it.slot].slice();
-    const n = it.affixes.length;
-    it.affixes = [];
+    // THE BRAND SURVIVES THE FIRE. A temper rerolls from SLOT_AFFIXES, which
+    // brands are deliberately not in -- so without this it quietly replaced
+    // the one thing that made a Riven piece worth owning with an ordinary
+    // affix, and charged for it. The brand is what the piece IS; the temper is
+    // everything else about it, which is also the reason not to refuse the
+    // sale outright the way the Regalia does.
+    const kept = it.affixes.filter(a => AFFIX_BY_ID[a.id] && AFFIX_BY_ID[a.id].brand);
+    const n = it.affixes.length - kept.length;
+    it.affixes = kept;
     for (let i = 0; i < n && pool.length; i++) {
       const id = pool.splice((Math.random() * pool.length) | 0, 1)[0];
       const a = AFFIX_BY_ID[id];
@@ -6173,6 +7269,7 @@ const GAIT_STEP = 21;        // world units of travel per pose at a run
 const WALK_STEP = 13;        // and at a walk, which is a shorter, quicker one
 const WALK_PACE = 0.62;      // above this fraction of top speed, he is running
 
+
 // Book the ground a body just covered against its stride, and keep a smoothed
 // reading of how hard it is travelling. Pace is what picks walk from run and
 // what tells a body it has stopped: gait alone cannot, because a body held up
@@ -6182,6 +7279,130 @@ function advanceGait(e, x0, y0, dt) {
   e.gait += moved;
   const want = dt > 0 ? Math.min(1.4, (moved / dt) / (e.speed || 1)) : 0;
   e.pace += (want - e.pace) * Math.min(1, dt * 9);
+}
+
+/* Standing still, breathing.
+ *
+ * The gait advances by DISTANCE TRAVELLED, which is what makes a walk read as
+ * walking whether the body is hurrying or trudging -- and it is also why a
+ * body that stops moving stops animating entirely. A room of stopped bodies is
+ * a room of statues, and that is the single largest reason the delve reads as
+ * static.
+ *
+ * Done as a TRANSFORM rather than as posed frames, which is the whole point.
+ * Six forged idle poses per creature was tried first and measured 3.95MB --
+ * a third of the entire sprite budget, on a phone, to say that a body is
+ * alive. It was also worse animation than it looked: a breath driven by one
+ * sine is symmetric, so frames 1 and 2 came out identical, as did 4 and 5, and
+ * six frames of texture held three poses.
+ *
+ * A horizontal swell costs nothing, is continuous rather than stepped, and
+ * needs no vertical compensation -- scaling only in x leaves the feet exactly
+ * where they were planted, which is the property every other animation here
+ * had to work for. It applies to whatever frame a standing body is wearing, so
+ * authored idle art (which the atlas still supports) breathes on top of its
+ * own cycle rather than instead of it.
+ *
+ * The phase is per-body and drawn once, for the same reason newBody starts the
+ * gait somewhere random: a pack breathing in unison looks more mechanical than
+ * a pack not breathing at all.
+ */
+const BREATH_MS = 2600;   // one slow breath
+const BREATH = 0.03;      // and how far the chest moves
+const BREATH_STEP = 64;   // and how often it is worth recomputing
+
+/* Quantised, deliberately.
+ *
+ * A 2.6-second breath has no detail at sixty frames a second, and every change
+ * to the value is a transform rebuilt on every standing body in the room --
+ * which in a delve is most of them. Measured on the Phaser build, updating it
+ * every frame cost enough that the layer profiler could no longer tell layers
+ * apart, reporting a whole 16.7ms display frame against layers that had not
+ * been touched.
+ *
+ * At 64ms the value moves about fifteen times a second, which over a 3% range
+ * is four hundredths of a percent per step -- far below a pixel on anything
+ * this draws -- and the renderers skip the write when it has not moved. Bodies
+ * hold different phases, so their steps fall on different frames rather than
+ * the whole room re-scaling at once.
+ */
+function breathScale(e) {
+  if (e.breathPhase === undefined) e.breathPhase = Math.random() * BREATH_MS;
+  const t = Math.round((performance.now() + e.breathPhase) / BREATH_STEP) * BREATH_STEP;
+  return 1 + BREATH * Math.sin(t / BREATH_MS * TAU);
+}
+
+/* Falling over.
+ *
+ * A body used to stop being drawn on the frame its hp reached zero, which is
+ * the cheapest possible death and reads as one: a thrall does not die, it is
+ * deleted. The core never removes a dead body from `enemies` -- everything
+ * simply skips hp <= 0 -- so all of this is presentation and the simulation
+ * never learns it happened.
+ *
+ * A TRANSFORM, not frames, for the reason the breath is: posed art for this
+ * costs texture per creature and there are eleven of them, and a topple is a
+ * rigid rotation, which is exactly what a transform does well.
+ *
+ * PIVOTED ON THE FEET. A body rotated about the middle of its sprite swings
+ * its legs out from under it and looks thrown rather than felled. Both
+ * renderers turn about the sprite centre, so the compensation is done here
+ * instead: rotating the foot vector (0, f) by rot moves the foot to
+ * (-f sin rot, f cos rot), and offsetting the whole sprite by the difference
+ * puts it back where it fell. Shared rather than written twice, because the
+ * two builds have to agree on it exactly.
+ *
+ * The fade is late and quick -- a body that starts dissolving as it begins to
+ * fall reads as a summon being dismissed, not as something being killed.
+ */
+const DIE_MS = 480;
+const DIE_TILT = 1.15;     // radians it comes to rest at, a bit past sixty degrees
+function deathPose(e) {
+  if (e.hp > 0) {
+    if (e.dieAt !== undefined) e.dieAt = undefined;
+    return null;
+  }
+  const now = performance.now();
+  if (e.dieAt === undefined) e.dieAt = now;
+  const t = (now - e.dieAt) / DIE_MS;
+  if (t >= 1) return { done: true };
+  const ease = 1 - (1 - t) * (1 - t);            // fast off the mark, settling
+  const rot = ease * DIE_TILT * (e.face < 0 ? -1 : 1);
+  const f = (e.r || 13) * 1.10;                  // the feet, below the centre
+  return {
+    done: false, t, rot,
+    dx: f * Math.sin(rot),
+    dy: f * (1 - Math.cos(rot)) + ease * (e.r || 13) * 0.12,
+    alpha: t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45
+  };
+}
+
+/* Flinching.
+ *
+ * A struck body flashes white and is otherwise unmoved, which says THAT it was
+ * hit and nothing about how hard or from where. A recoil says both, and it is
+ * the difference between a number appearing over a statue and a body taking a
+ * blow.
+ *
+ * Rides `hitFlash`, which the core already keeps and already counts down, so
+ * this needs no clock of its own and cannot drift out of step with the flash
+ * it accompanies. Out fast and back slower -- a flinch is a shove and a
+ * recovery, not a wobble -- and the whole thing is over in 0.12s, which is
+ * why it is a shove of a few units rather than a lunge: at that length
+ * anything larger reads as the body being teleported.
+ *
+ * It moves the SPRITE, never the body. Where a body actually is belongs to the
+ * simulation, and a renderer that quietly moved things would put a hitbox
+ * somewhere the player cannot see.
+ */
+const FLINCH = 3.4;        // world units, at the top of the shove
+function flinchOffset(e) {
+  const f = (e.hitFlash || 0) / 0.12;                 // 1 fresh -> 0 recovered
+  if (f <= 0 || e.hitX === undefined) return null;
+  // Peaks a third of the way in: out in 0.04s, back over the remaining 0.08.
+  const k = f > 0.66 ? (1 - f) / 0.34 : f / 0.66;
+  const d = FLINCH * k;
+  return { x: e.hitX * d, y: e.hitY * d };
 }
 
 // Which sprite a body wears this frame. Below GAIT_STILL it is standing.
@@ -6255,14 +7476,83 @@ function endRun(won) {
           items, coins: run.coins }
       : null;
   }
+  // THE TROPHY, before the wipe: eight pieces of the Regalia carried out of a
+  // Hardcore delve. Checked against what is WORN plus what is in the bag,
+  // because a set is only finished when the last piece is out of the ground,
+  // and it is banked here rather than in bankRun so that it is recorded from
+  // the same place the wipe is -- the two must never be able to disagree.
+  if (hardcore && won) {
+    const carriedSet = player.bag.filter(it => it.set === SET_ID).length;
+    if (setWorn(player) + carriedSet >= SLOTS.length) {
+      const h = loadHonours();
+      if (!h.crimson) {
+        h.crimson = 1;
+        h.crimsonAt = Date.now();
+        saveHonours(h);
+        run.banner = 4.0;
+        run.bannerText = 'The Regalia is whole';
+        run.bannerNote = 'Carried out of one life. The edge answers in crimson now.';
+      }
+    }
+  }
+  // THE BOUNTY PAYS ON THE WAY OUT, and only on the way out -- it is the
+  // ley-gate that is the objective, the same as any other delve. Once a day:
+  // the claim is stamped with the day it was taken so tomorrow's is free.
+  // Recorded on the run, not only said in the outcome copy. The fact that the
+  // bounty was paid -- or held back because the vault was full -- belongs to
+  // the run; the sentence about it belongs to whichever build is drawing the
+  // card, and there are two of those.
+  run.bountyPaid = 0; run.bountyHeld = 0;
+  let bounty = 0, bountyHeld = 0;
+  if (won && run.bounty && !bountyDone()) {
+    // The vault has to have room for it FIRST. Stamping the claim and then
+    // finding nowhere to put the piece spends the day's bounty on nothing,
+    // and the player has no way to know that is what happened.
+    if (stash.vault.length >= vaultCap()) { bountyHeld = run.bountyHeld = 1; }
+    else {
+    stash.bounty = { day: run.bounty.day, done: true };
+    stash.bountyArmed = false;
+    const it = rollItem(0.9);
+    it.rarity = 'hallowed';                    // the promise is the tier
+    while (it.affixes.length < 4) {
+      const pool = SLOT_AFFIXES[it.slot].filter(
+        id => !it.affixes.some(a => a.id === id));
+      if (!pool.length) break;
+      const id = pool[(Math.random() * pool.length) | 0];
+      const a = AFFIX_BY_ID[id];
+      let v = (a.lo + Math.random() * (a.hi - a.lo)) * 1.2;
+      v = a.dp ? +v.toFixed(a.dp) : (Math.abs(a.lo) >= 1 ? Math.max(1, Math.round(v)) : v);
+      it.affixes.push({ id, v });
+    }
+    it.name = AFFIX_BY_ID[it.affixes[0].id].name + ' ' + it.base;
+    stash.vault.push(it);
+    bounty = run.bountyPaid = 1;
+    }
+  }
   bankRun(won);
+  // And one life means one. Everything the Vanguard owned goes with them --
+  // after the banking, so the last delve is scored before it is taken away,
+  // and after the trophy, which is the one thing death cannot reach.
+  if (hardcore && !won) wipeHardcore();
 
-  el.overTitle.innerHTML = won ? '<em>Escaped</em>' : '<span>Slain</span>';
+  el.overTitle.innerHTML = won ? '<em>Escaped</em>'
+                              : hardcore ? '<span>Ended</span>' : '<span>Slain</span>';
+  // A Hardcore death is not the ordinary one and must not read like it. The
+  // corpse branch below is right by accident -- the wipe cleared the corpse,
+  // so it falls through to the short line -- but "the hive-mind claimed
+  // another" is what it says every other time you die, and this time nothing
+  // is owed to you and there is nothing to descend for.
   el.overSub.textContent = won
-    ? (carried ? 'The ley-gate held. You carried ' + carried +
+    ? ((carried ? 'The ley-gate held. You carried ' + carried +
                  (carried === 1 ? ' find' : ' finds') + ' out with the slag.'
-               : 'The ley-gate held. You carried the slag out.')
-    : (stash.corpse
+               : 'The ley-gate held. You carried the slag out.') +
+       (bounty ? ' The bounty is paid: a Hallowed piece waits in the vault.'
+        : bountyHeld ? ' The bounty is still owed \u2014 the vault is full, and ' +
+                       'it will not be paid into the ground.' : ''))
+    : hardcore
+      ? 'One life, and it is spent. Everything the Vanguard carried, wore and ' +
+        'banked is gone with them. Begin again.'
+      : (stash.corpse
         ? 'The hive-mind claimed another of the Clear-Sighted. ' +
           (carried ? carried + (carried === 1 ? ' find' : ' finds') + ' and ' : '') +
           run.coins + ' coin lie in ' + LEVEL.name + '. Descend again and take them back.' +
@@ -6285,15 +7575,19 @@ function endRun(won) {
    before the core is stepped; this list is generated, so it cannot drift out
    of date the way a hand-written one would.
 
-     saveStash            called from claimCorpse, hallBuy, bankRun +5
+     saveStash            called from claimCorpse, wipeHardcore, hallBuy +6
      showScreen           called from startRun, openGear, closeGear +5
      syncBagBadge         called from updateDrops, claimCorpse, resetRun +1
+     loadHonours          called from update, endRun
      buildKit             called from swapHero, startRun
      syncHeroSkin         called from swapHero, startRun
      renderGear           called from openGear, afterGearChange
      refreshKitLine       called from closeGear, refreshHubLines
      buildStains          called from generateWorld
      hitFlashUI           called from hurtPlayerBy
+     rememberHardcore     called from setHardcore
+     loadStash            called from setHardcore
+     dropHardcoreStash    called from wipeHardcore
      minimapBox           called from dawnCrystalRect
      forgeGround          called from resetRun
      forgeWallCourses     called from resetRun
@@ -6305,5 +7599,6 @@ function endRun(won) {
      renderVendor         called from openVendor
      loadBest             called from endRun
      saveBest             called from endRun
+     saveHonours          called from endRun
      refreshBestLine      called from endRun
    ------------------------------------------------------------------------ */

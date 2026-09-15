@@ -3,8 +3,10 @@
 A tower defence with a six-map campaign. Fifteen waves a map, four towers,
 three difficulties, stars per map, maps unlocking in order.
 
-**The terrain is drawn in code.** There is not one background image in the
-game. A map is about ten lines of data.
+**The terrain is composed, not painted.** There is no background image: the
+ground is a tiling texture, the road is a texture pattern-filled along a
+spline, and the scenery is painted props scattered by the code that knows
+where the road is. A map is about ten lines of data.
 
 Hand-written, no engine. Offline once loaded, no accounts, no network calls,
 nothing leaving the device. Saves stars, gems and the two audio toggles to
@@ -13,10 +15,14 @@ nothing leaving the device. Saves stars, gems and the two audio toggles to
 ```
 index.html     shell, HUD, overlays, all CSS
 map.js         terrain: geometry, build pads, renderer
+enemies.js     drawn enemies — the fallback when a kind has no art
+props-data.js  GENERATED atlas manifest — tools/build-props.py writes it
+towers-data.js GENERATED atlas manifest — tools/build-towers.py writes it
+fx-data.js     GENERATED atlas manifest — tools/build-fx.py writes it
 game.js        the game, and the campaign
-assets/        44 files, 764KB — towers, enemies, UI. No backgrounds.
+assets/        58 files, 1.4MB — prop, tower and fx atlases, enemy sheets, UI
 sw.js          offline cache — generated, run tools/stamp-sw.py
-tools/         asset pipeline, balance sim, sw stamper
+tools/         props, towers, fx, enemy sheets, sprites, balance sim, stamper
 ```
 
 Open `index.html` over http, or from `file://` — the service worker is skipped
@@ -47,7 +53,8 @@ inversion is a win:
   sides, auto-rejecting anything near water, the map edge or another pad.
 - **Pad distance is one constant.** It is also the single most important number
   in the balance — see below — and it can no longer drift per map.
-- **Biome is a palette swap.** Island, forest and snow are the same renderer.
+- **Biome is a kit swap.** Twelve kits, all the same renderer with a different
+  ground tile, road texture and prop set.
 - **Level select thumbnails are free**: the same renderer at card size.
 - **The menu backdrop is a level** — the furthest one unlocked.
 - **A new map costs about ten lines and zero bytes.**
@@ -61,25 +68,231 @@ Two cheap things carry the cartoon look and both are load-bearing: every solid
 shape gets a dark outline, and every highlight falls to the top-left. Without
 them it reads as a diagram rather than a game board.
 
+## Towers
+
+Four types, three tiers each, and a projectile per element — all from the pack:
+
+```sh
+python3 tools/build-towers.py ~/art/Tower_Assets_2/PNG
+python3 tools/stamp-sw.py
+```
+
+The pack ships each tower as **three tiers**, which the game had not been using
+— it drew one flat sprite per type, and not even consistently: the file called
+`tower_arcane` was tier *three* of the dark tower while `tower_bolt` was tier
+*one* of the temple. The tool maps them by exact pixel size against what the
+game already shipped rather than by eye.
+
+A tower's art now steps up as it is upgraded: levels 1–3 tier one, 4–6 tier
+two, 7–10 tier three. Uneven on purpose — tier two arrives early enough that
+the first real investment in a tower is visible on the board and not only in
+the upgrade panel.
+
+Projectiles are the pack's own per element, rotated to their heading. The
+sprites are drawn pointing up, so the heading gets a quarter turn added; a bolt
+travelling sideways flew flat without it.
+
+Tier one is also written out as a standalone `tower_<type>.png`. That is what
+the HUD slot shows, and what the board falls back to if the atlas fails — a
+tower that does not draw at all is worse than a tower without tiers.
+
+Impacts come from the same pack:
+
+```sh
+python3 tools/build-fx.py ~/art/Tower_11/PNG
+```
+
+An eight-frame explosion for the arcane splash, which used to be an expanding
+circle, and a four-frame spark burst for every other hit — **tinted per tower
+type at load**, so a hit tells you which tower landed it. Tinting at draw time
+would be a composite pass per hit per frame; baked once, a hit is a
+`drawImage`. Frames in a sequence are different sizes because the effect
+expands, so they are padded to a common box rather than trimmed to one: trimmed
+individually, the burst drifts as it plays.
+
+## Specialisations
+
+Three stat tracks — damage, range, fire rate, three levels each — make a tower
+bigger. They never make it a *different* tower, and the simulation had already
+shown that what decides a level is which tower answers its roster. So maxing
+any track opens a permanent, one-time fork: two specialisations per tower,
+bought once, no sell-back.
+
+| tower | | |
+|---|---|---|
+| **fire** | BURN — less hit damage, sets alight; ignores armour, stops regen | SCORCH — fires slower, every shot bursts |
+| **ice** | SHATTER — barely damages; what it slows takes +55% from *every* tower | DEEP FREEZE — almost no damage; slows harder, longer, and slow-immune kinds |
+| **bolt** | OVERLOAD — weaker bolts, arcs to four more | LANCE — no chain, slower, double damage through armour |
+| **arcane** | SIEGE — far wider blast, a third less reach | RIFT — half again the reach, hits for little, drags what it catches |
+
+Each answers a threat the next-wave panel names, so the warning and the
+purchase are one conversation. SHATTER is the odd one and the point of the
+set: it is the only tower whose worth depends on what is standing around it.
+
+**Every fork costs something.** See the Balance section for what happened when
+they did not. Tune them with `node tools/sim.mjs --forks`, which varies one
+fork at a time against a fixed build and reports where each is the best answer.
+The target shape is every option best *somewhere* and best *nowhere near
+everywhere*.
+
+`node tools/specs.mjs` asks the other question — whether a fork does anything
+at all. A behaviour that silently fails scores exactly like the base tower, so
+a sweep cannot see it; the bench puts one tower against one enemy kind and
+reads the mechanic directly.
+
+A specialised tower is marked on the board by a pool of the mechanic's colour
+on the ground under it. Text does not work there: the map draws at about a
+fifth of size on a phone, so a thirteen-pixel badge becomes four and its
+letters become nothing.
+
+## Bosses
+
+Three, one mechanic each, spread across the campaign as part of a level's
+roster:
+
+| boss | mechanic | the answer |
+|---|---|---|
+| **DEMON LORD** | SHIELD — an absorbing pool that goes up, holds, drops, refreshes | burst it down; chipping never gets through before it refreshes |
+| **THE WARLORD** | JAM — silences the nearest tower it walks past, then the next | towers spread along the road, not one strong killbox |
+| **THE MATRIARCH** | SUMMON — drops fodder behind itself as it walks | kill it fast, or carry something that clears crowds |
+
+The next-wave panel warns three waves out with the mechanic's name, derived
+from the boss kind rather than written per level.
+
+**SUMMON must stay capped over the boss's whole life, not merely paced.**
+Uncapped it put out sixty extra enemies in one crossing and made both levels
+it appeared on unwinnable on *easy*. A slow boss survives a long time, so a
+rate limit cannot bound the total; only a total can.
+
+`node tools/bosses.mjs` benches each mechanic in isolation. Read the SHIELD
+pair: chipping leaves the pool up for hundreds of frames across several cycles
+and the boss lives; adding burst collapses it in one cycle and kills it. If
+those two lines ever look alike, the shield has gone back to being hit points.
+
+**What bosses do not do**, measured: they do not change *which build wins* a
+level. Two waves in fifteen carry a boss and the other thirteen decide the
+run, so the spread by boss type sits inside the sweep's own noise. The one
+real signal is `boss-killer/lance` at 4/6 against SHIELD and 2/6 against
+SUMMON — single-target damage being the wrong answer to a summoner. Making
+bosses central enough to move the answer is a larger change than adding them
+was.
+
+Warlord and matriarch reuse the sentinel's and ogre's sheets at boss scale.
+
+## Telling the player what is coming
+
+Between waves the HUD shows the next wave's roster as portraits with counts,
+threat warnings, and how far off the next boss is. All of it is **derived**
+from the level's roster and its wave curve — ARMOUR appears because a kind in
+that wave has `armour` below one, AIR because one has `flying`, and so on,
+each test reading the exact property the combat code reads. Swap a level's
+heavy for an armoured one and the warning follows for free.
+
+A threat that is new this wave is loud; one carried over from the wave before
+is muted. The first version warned on every wave the threat applied to, which
+was correct and useless — a siege level showed ARMOUR fifteen times out of
+fifteen. A signal that is always on is wallpaper.
+
+`node tools/layout.mjs` checks every HUD box against every other at six
+viewports and exits non-zero on an overlap. It exists because the wave counter
+shipped drawn *on top of* the stats box on a portrait phone, and no unit test
+would have caught that.
+
+## Where the terrain comes from
+
+The pack ships each map as **separate layers** rather than as a flat picture: a
+tileable ground texture, road pieces, and painted trees, bushes, stones and
+decorations — four complete biome kits. `tools/build-props.py` packs all of it
+into one atlas.
+
+```sh
+python3 tools/build-props.py ~/art/Tower_tileset/PNG
+python3 tools/stamp-sw.py
+```
+
+The road is the interesting part. The pack's road pieces are **fixed corners
+and junctions**, so they cannot follow an arbitrary spline and none of them are
+used as tiles. What is used is the texture *inside* them: a square is cut from
+the middle of the straight piece, and the road is stroked into a scratch canvas
+and that texture composited into it with `source-in`. A stroke cannot be a clip
+region, so this is the way to pattern-fill one — and it is what lets painted
+road art follow a road it was never drawn for.
+
+Three things that needed correcting once it was on screen, none of them
+visible in the source art:
+
+- **The road vanished.** Several kits paint road and ground at nearly the same
+  value — the meadow road is pale yellow-green on pale green — and rely on a
+  dark border for the contrast. Drawn faintly, the lane disappeared into the
+  field. The border is now derived from the sampled edge at 0.42 brightness.
+- **The ground needed to come down a shade** so the road could be the lighter
+  of the two. A flat amount crushed the ash kit, which is nearly black to start
+  with and is the map whose boss is a black horned demon, so the amount is
+  scaled by the ground tile's own measured luminance.
+- **Frost swamped itself.** It ships no trees, so its tall crystal growths were
+  the tallest thing on the board at the height decor was given. Decor now caps
+  below tree height.
+
+Everything is still composited once per level into an offscreen canvas, so a
+map with ninety painted props costs one `drawImage` per frame.
+
+## How many different levels are actually possible
+
+Not a rhetorical question — `tools/sim.mjs --rosters N` measures it. It holds
+the map and difficulty fixed, varies the **wave curve and the roster**, and
+reports which of five build strategies clears each result. Two levels the same
+builds beat are the same puzzle in different scenery.
+
+**Visually: twelve biome kits × any path you draw × any seed.** Effectively
+unlimited; the kits start repeating somewhere past twenty levels.
+
+**Mechanically: five or six distinct puzzles**, each tunable to several
+difficulty points. Sixty-four curve+roster pairs on a neutral map produced six
+distinct outcomes. The six-level campaign uses four of them.
+
+Three levers decide that number, and they were built in the order they matter:
+
+- **The roster.** Which kinds fill fodder / fast / heavy / boss. Alone it gave
+  six outcomes from forty rosters, but thirty-one fell into two buckets,
+  because the **fodder slot decided nearly everything** — a wave is 8–20 fodder
+  against 2–8 heavies, so the fodder is what the towers spend their time
+  shooting.
+- **The curve.** `standard`, `siege` (heavies from wave two, little fodder),
+  `swarm` (almost nothing but fodder, in numbers), `rush` (fast units front to
+  back). This is the lever the roster did not have: it changes which *slot*
+  matters, so the fodder stops deciding alone.
+- **Counter-mechanics.** `armour` (splash ignores it), `slowImmune`, `flying`
+  (crosses in a straight line between the road's two ends, so every pad chosen
+  to cover a bend covers nothing), `regen` (heals unless hit recently, so chip
+  damage stops working), `split` (on death becomes two of something else).
+
+Raising the number further means another lever, not another level. A second
+spawn point, or towers that can be repositioned, would each add one.
+
 ## Balance
 
 Simulation-checked, not guessed. `tools/sim.mjs` runs the real `game.js`
-headlessly through all six maps, three difficulties and five build strategies
-— ninety runs in a few seconds.
+headlessly through all six maps, three difficulties and nine build strategies
+— 162 runs in under a minute.
 
 ```
-level           easy            normal          hard
-1. landing      10/10 win 25/25 8/10 win 18/20  5/10 win 4/18
-2. palmrun      10/10 win 25/25 8/10 win 18/20  5/10 win 8/18
-3. deepwood     10/10 win 25/25 8/10 win 17/20  4/10 win 5/18
-4. millpond     10/10 win 25/25 8/10 win 17/20  2/10 win 3/18
-5. frostgate    10/10 win 25/25 8/10 win 16/20  3/10 win 6/18
-6. longroad     10/10 win 25/25 10/10 win 19/20 4/10 win 8/18
+level           easy         normal        hard
+1. landing      9/9 win 25/25 9/9 win 13/20 3/9 win 8/18
+2. palmrun      9/9 win 25/25 7/9 win 17/20 4/9 win 10/18
+3. deepwood     9/9 win 24/25 7/9 win 16/20 1/9 win 7/18
+4. millpond     9/9 win 24/25 7/9 win 18/20 4/9 win 14/18
+5. frostgate    9/9 win 24/25 6/9 win 14/20 3/9 win 3/18
+6. longroad     9/9 win 25/25 6/9 win 20/20 4/9 win 15/18
 ```
 
-Easy is comfortable, normal is cleared by four of five builds, hard is tight
-and winnable on every map. Read it as a spread: a level nothing clears is a
-wall, a level everything clears is not asking anything.
+Easy is comfortable, normal is cleared by most builds, hard is tight and
+winnable on every map. Read it as a spread: a level nothing clears is a wall,
+a level everything clears is not asking anything.
+
+**The sweep is noisy.** The wave queue is shuffled, so repeating it on
+unchanged code moves each strategy by about two runs in eighteen. A one-run
+lead means nothing. What is worth acting on is a build or a fork that wins
+nearly everything, or nearly nothing.
 
 Four things the simulation found that reading the code would not have:
 
@@ -98,6 +311,17 @@ Four things the simulation found that reading the code would not have:
   It chains once now, and costs more.
 - **Ice and arcane were priced as damage towers while dealing almost none**, so
   an opening built on them lost by wave 3.
+- **Specialisations that only give are not choices.** The first version of the
+  tower forks cost energy and nothing else. A mixed build taking either spec
+  set won 17 or 18 of 18 against 16 for the same build without them, and
+  cleared the hardest level without losing a life. Every fork now trades away
+  damage, rate or reach for what it gains — which is the only thing that lets
+  a fork be the *wrong* pick on a given level.
+- **A spec set hides which half of it is working.** Measured as pairs,
+  `scorch+freeze` beat `burn+shatter` and the reason was invisible. Varying one
+  fork at a time (`--forks`) showed SCORCH best on eleven of twelve
+  level-and-difficulty pairs — strictly correct, therefore not a decision — and
+  BURN *worse than buying nothing*, a trap. Both are now middling.
 
 Starting energy is deliberately similar across difficulties: it has to buy an
 opening of three towers everywhere. Hard starting at two towers was a cliff,
@@ -110,6 +334,17 @@ not a curve.
 npm i playwright && node tools/sim.mjs          # the summary table above
 node tools/sim.mjs --full                       # every run, itemised
 node tools/sim.mjs --level deepwood --runs 3    # one map, repeated
+node tools/sim.mjs --rosters 40                 # how distinct can levels be
+node tools/sim.mjs --forks                      # one tower fork at a time
+
+# Does each specialisation actually DO anything? (a sweep cannot tell)
+node tools/specs.mjs
+
+# Does each boss mechanic fire, and can it be answered?
+node tools/bosses.mjs
+
+# Does the HUD collide with itself at any size?
+node tools/layout.mjs
 
 # Replace art (towers, enemies, UI — no backgrounds)
 python3 tools/build-assets.py --list ~/art        # what filenames are accepted
@@ -125,6 +360,32 @@ left and right edges (`-40` and `1580`) so the road enters and leaves the
 board cleanly. Then run the sim and set `hp` and `padGap` from what it reports
 — those two are the difficulty dial, and guessing them is how levels 4–6 first
 came out as walls.
+
+## Enemies
+
+Four kinds, each a painted sprite sheet built from the pack:
+
+```sh
+python3 tools/build-enemies.py ~/art/Tower_5/PNG --contact  # see all ten types
+python3 tools/build-enemies.py ~/art/Tower_5/PNG            # build the sheets
+python3 tools/stamp-sw.py
+```
+
+One sheet per animation, frames left to right — eighty loose frames would be
+eighty requests. Three details in that tool are load-bearing:
+
+- **One bounding box per animation, not per frame.** Trimming each frame to its
+  own content makes the sprite jitter as it plays, because the trim moves
+  underneath it.
+- **Palette quantisation.** Painted sprites drawn at 110–250px do not need
+  full-depth RGBA: 2.28MB became 257KB with no visible difference.
+- **Ten frames, not twenty.** Twenty at 92ms is a two-second walk cycle; ten
+  reads identically and halves the file.
+
+`enemies.js` draws the four kinds from scratch — jointed figures with walk
+cycles, an outline and a light direction, matching the terrain. Nothing uses it
+now that the art is in, and that is the point: it is the fallback. Set a kind
+to `null` in `ENEMY_ART` and it draws rather than disappears.
 
 ## Dropping in the real art
 
@@ -206,14 +467,40 @@ Deliberate omissions, not oversights:
   from the pack's JPEGs by keying the black surround — good, but inferred.
   See **Dropping in the real art** above. This no longer touches backgrounds,
   only towers, enemies and UI.
-- **The victory header reads "ACHIEVEMENT"** — the closest thing to a
-  celebratory header the pack has. It wants a real one.
-- **One enemy sprite set.** Grunt, runner, brute and boss are the same ten run
-  frames at different scales and tints, baked once at load. Real variety needs
-  art — and it is now the only thing in the game that does.
-- **No music.** The toggle persists and the sound effects are synthesised.
+- **Gems accumulate and buy nothing.** One per wave cleared, five per level.
+  They are the obvious hook for permanent progression and currently a number
+  that goes up. Either spend them or remove them.
+- **Bosses do not change which build wins.** They have real mechanics now, but
+  at two boss waves in fifteen the other thirteen decide the run. Moving that
+  needs bosses to be more central — more boss waves, or a mechanic that
+  persists past the boss's death — not more mechanics.
+- **Two bosses wear borrowed art.** Warlord is the sentinel's sheet and
+  matriarch the ogre's, both at boss scale.
+- **Maps differ by geometry, roster and curve only.** No conveyor, no second
+  entrance, no hazard, no tower restriction. The renderer also has no
+  elevation, so cliffs, bridges and crossing roads all need height support it
+  does not have.
+- **No risk/reward wager.** Calling a wave early for +3 energy a second is the
+  only one in the game.
+- **No music.** The toggle persists and the sound effects are synthesised
+  oscillators — there are no audio assets in the pack at all.
 - **No achievements.** The pack has a window for them; nothing opens it,
   because there are no achievements yet to put in it.
-- **The renderer has no elevation.** Cliffs, bridges and roads that cross
-  would all add map variety, and all need the renderer to understand height,
-  which it currently does not.
+- **The victory header reads "ACHIEVEMENT"** — the closest thing to a
+  celebratory header the pack has. It wants a real one.
+- **Only walk and die are used.** The pack also ships attack, hurt, idle, jump
+  and run per type. An attack animation when something reaches the end is
+  art-complete and code-only.
+- **Water is still drawn, not painted.** The pack ships a `lake.png` per kit;
+  the game draws an ellipse. It shows most on the dark kits — a bright pond in
+  a volcano should probably be lava.
+- **The pack has a second tower family** — catapults and ballistae, with archer
+  units that have their own bow animations. A tower that fires a visible unit
+  rather than a bolt would use them, and nothing does yet.
+- **Chain lightning is still drawn**, not painted: the arc between chained
+  targets is a stroked line. The pack has no art for it, so this one would
+  stay drawn even with everything else swapped.
+- **Android packaging has never been done.** The two blockers a WebView build
+  would have hit are fixed — the level select renders from `file://`, and the
+  hardware back button walks the overlay stack down to the menu — but nothing
+  has been wrapped, signed or run on a device.

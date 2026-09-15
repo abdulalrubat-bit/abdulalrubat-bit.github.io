@@ -98,7 +98,7 @@
   .levelCard{position:relative;border:3px solid #c79645;border-radius:12px;
     background:#3c2413;padding:0;overflow:hidden;min-height:0;
     box-shadow:0 3px 7px #0008;display:flex;flex-direction:column}
-  .levelCard .thumb{width:100%;flex:1;min-height:0;object-fit:cover;display:block}
+  .levelCard .thumb{width:100%;flex:1;min-height:0;display:block;object-fit:cover}
   .levelCard .cap{padding:4px 6px 5px;background:linear-gradient(#5b3618,#3c2413);
     display:flex;flex-direction:column;gap:1px}
   .levelCard .n{font:900 clamp(9px,1.4vw,13px) Arial;color:#ffe8a3;
@@ -157,6 +157,7 @@
     font:900 clamp(11px,2vw,17px) Arial;text-shadow:2px 2px #21140d}
   #upgradeCards{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
     min-height:0}
+  #specRow{flex:0 0 auto}
   .upCard{position:relative;border:0;background:transparent;padding:0;min-width:0;
     display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
   .upCard>img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
@@ -170,6 +171,35 @@
     font:900 clamp(10px,1.7vw,14px) Arial}
   .upCard[disabled]{opacity:.45}
   .upCard:not([disabled]):active{transform:scale(.95)}
+
+  /* The specialisation fork. Hidden until a track is maxed, then two cards;
+     after one is bought, a single banner saying which. It is deliberately a
+     different shape to the three stat cards above it — a permanent, one-time
+     choice should not look like another rung on a ladder. */
+  #specRow{margin-top:8px}
+  #specRow:empty{display:none}
+  #specHdr{text-align:center;color:#ffcf7a;letter-spacing:1.5px;
+    font:900 clamp(9px,1.5vw,12px) Arial;text-shadow:2px 2px #21140d;
+    margin-bottom:5px}
+  #specPick{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch}
+  .specCard{border:3px solid #8a6a2e;border-radius:14px;background:#2a1a0f;
+    padding:7px 8px;text-align:left;color:var(--cream);min-width:0;
+    display:flex;flex-direction:column;gap:3px}
+  .specCard .n{font:900 clamp(11px,1.9vw,15px) Arial;color:var(--gold);
+    text-shadow:2px 2px #21140d}
+  .specCard .d{font:700 clamp(8px,1.35vw,11px) Arial;line-height:1.3;
+    color:#e6d3a8;white-space:pre-line}
+  .specCard .buy{align-self:flex-start;margin-top:auto;padding:2px 9px;
+    border-radius:9px;background:#1d120b;border:2px solid #d8b56a;color:#fff;
+    font:900 clamp(10px,1.6vw,13px) Arial}
+  .specCard[disabled]{opacity:.45}
+  .specCard:not([disabled]):active{transform:scale(.97)}
+  #specHas{border:3px solid #c08a34;border-radius:14px;background:#3a2a12;
+    padding:7px 10px;text-align:center}
+  #specHas .n{font:900 clamp(12px,2.1vw,17px) Arial;color:#ffd98a;
+    text-shadow:2px 2px #21140d}
+  #specHas .d{font:700 clamp(8px,1.35vw,11px) Arial;color:#e6d3a8;
+    line-height:1.3;white-space:pre-line;margin-top:2px}
   #upgradeActions{display:flex;align-items:center;justify-content:space-between;
     gap:10px;height:22%;margin-top:6px}
   #upgradeActions .iconBtn{height:100%;width:34%}
@@ -190,7 +220,6 @@
     color:#fff;text-shadow:2px 2px 3px #000;letter-spacing:.5px}
   .stat span{position:absolute;right:12px;top:3px;z-index:2;font:900 16px Arial;
     text-shadow:2px 2px 3px #000}
-  .stat.flash span{color:#ff7b5e}
 
   #battleInfo{position:absolute;left:50%;top:2vh;transform:translateX(-50%);
     min-width:172px;padding:7px 16px;border:3px solid var(--wood);border-radius:16px;
@@ -199,6 +228,32 @@
   #waveLabel{font:900 clamp(15px,2.4vw,24px) Arial;color:var(--gold)}
   #waveState{font:900 10px Arial;color:var(--cream);margin-top:1px;letter-spacing:1px}
   #enemyCount{font:900 10px Arial;color:var(--cream);margin-top:1px}
+
+  /* The next-wave panel. Hangs off the bottom of the wave counter so the two
+     read as one block, and is only present between waves — during a wave the
+     board is the information and a panel over it is in the way. */
+  #wavePreview{position:absolute;left:50%;transform:translateX(-50%);
+    top:calc(2vh + 74px);min-width:172px;max-width:min(420px,86vw);
+    padding:6px 12px 7px;border:3px solid var(--wood);border-radius:16px;
+    background:var(--panel);box-shadow:0 5px 12px #0008;text-align:center;
+    text-shadow:2px 2px 3px #000;opacity:0;transition:opacity .18s;
+    pointer-events:none}
+  #wavePreview.show{opacity:1}
+  #previewHdr{font:900 9px Arial;color:var(--cream);letter-spacing:1.5px}
+  #previewRoster{display:flex;justify-content:center;flex-wrap:wrap;gap:4px;
+    margin-top:3px}
+  .pvUnit{position:relative;width:38px;height:38px}
+  .pvUnit canvas{width:100%;height:100%;display:block}
+  .pvUnit b{position:absolute;right:-1px;bottom:-2px;font:900 11px Arial;
+    color:var(--gold);text-shadow:2px 2px 3px #000,0 0 4px #000}
+  #previewThreats{display:flex;justify-content:center;flex-wrap:wrap;gap:4px;
+    margin-top:4px}
+  .pvTag{font:900 9px Arial;letter-spacing:.6px;padding:2px 6px;border-radius:7px;
+    background:#5a1c12;border:2px solid #a8412a;color:#ffcaa8}
+  .pvTag.boss{background:#43135c;border-color:#9b4fd0;color:#efc6ff}
+  .pvTag.held{background:#2c2a1c;border-color:#6b6045;color:#b9ac86}
+  #previewBoss{font:900 9px Arial;color:#ff9c6b;letter-spacing:1px;margin-top:4px}
+  #previewBoss:empty{display:none}
 
   #rightControls{position:absolute;right:2vw;top:2vh;display:flex;
     flex-direction:column;gap:10px;align-items:center}
@@ -255,12 +310,42 @@
     opacity:0;transition:opacity .2s ease}
   #toast.show{opacity:1}
 
+  /* Banners. The board draws at about a fifth of its size on a phone, so
+     anything announced ON it is unreadable — these are DOM, sized in viewport
+     units, and legible at every size the game runs at. */
+  /* Below the next-wave panel, not over it. Clearing a wave shows both at the
+     same moment — the banner says what was just earned and the panel says what
+     is coming — and the first version drew one straight through the other. */
+  #banner{position:absolute;left:50%;top:58%;transform:translate(-50%,-50%) scale(.82);
+    z-index:6;text-align:center;pointer-events:none;opacity:0;
+    transition:opacity .18s ease,transform .18s ease}
+  #banner.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #banner b{display:block;font:900 clamp(24px,6.4vw,54px) Arial;letter-spacing:2px;
+    color:var(--gold);text-shadow:4px 4px 0 #21140d,0 0 22px #000}
+  #banner i{display:block;font:900 clamp(11px,2.4vw,19px) Arial;font-style:normal;
+    letter-spacing:2px;color:var(--cream);text-shadow:3px 3px 0 #21140d;margin-top:4px}
+  #banner.bad b{color:#ff8a5c}
+  #banner.bad i{color:#ffc9b0}
+
+  /* The lives readout is the answer to "how close am I to losing", so it stops
+     being a quiet number once the answer is "very". */
+  .stat.flash span{color:#ff7b5e}
+  .stat.danger span{color:#ff6a4a;animation:lowPulse .85s ease-in-out infinite}
+  @keyframes lowPulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @media(prefers-reduced-motion:reduce){
+    .stat.danger span{animation:none}
+    #banner{transition:opacity .18s ease}
+  }
+
   @media(max-width:760px){
     #stats{left:8px;top:8px;width:196px;min-width:0;padding:6px 8px;border-radius:15px}
     .stat{height:27px}
     .stat b{left:8px;top:7px;font-size:8px}
     .stat span{right:9px;top:3px;font-size:13px}
     #battleInfo{top:8px;min-width:130px;padding:5px 10px;border-radius:12px}
+    #wavePreview{top:70px;min-width:130px;padding:4px 9px 5px;border-radius:12px}
+    .pvUnit{width:30px;height:30px}
+    .pvTag{font-size:8px;padding:2px 5px}
     #rightControls{right:8px;top:8px;gap:7px}
     #pause{width:50px;height:50px;font-size:21px;border-radius:14px}
     #callWave{width:66px;height:66px}
@@ -271,15 +356,34 @@
     #toast{bottom:15vh;font-size:11px}
     #upgradePanel{left:6%;right:6%;padding:9px}
     #upgradeCards{gap:5px}
+    #specPick{gap:5px}
+    .specCard{padding:5px 6px;border-radius:11px}
+    #specRow{margin-top:5px}
     #upgradeClose{width:46px;height:46px}
     .win{width:95vw;height:82vh}
   }
   /* Short-and-wide (phone held in landscape): the HUD must not eat the board. */
+  @media(max-width:760px) and (min-height:461px){
+    #battleInfo{top:90px}
+    #wavePreview{top:152px}
+  }
   @media(max-height:460px){
     #bottomBar{height:68px}
     .slot{max-width:62px}
     #stats{width:180px}
     #battleInfo{padding:4px 9px}
+    /* Landscape is how the game is actually held, and there the board fills
+       the screen — so a tall panel parked at top-centre sits on the road. It
+       only shows between waves and taps pass straight through it, but it
+       still hides a pad you might want. Laid out as one row it covers a strip
+       instead of a block. */
+    #wavePreview{top:110px;display:flex;align-items:center;gap:8px;
+      max-width:min(460px,62vw);padding:3px 10px}
+    #previewHdr{white-space:nowrap}
+    #previewRoster{margin-top:0;flex-wrap:nowrap}
+    #previewThreats{margin-top:0;flex-wrap:nowrap}
+    #previewBoss{margin-top:0;white-space:nowrap}
+    .pvUnit{width:26px;height:26px}
   }
 </style>
 
@@ -296,6 +400,12 @@
     <div id="waveLabel">WAVE 0/15</div>
     <div id="waveState">READY</div>
     <div id="enemyCount">ENEMIES 0</div>
+  </div>
+  <div id="wavePreview" aria-live="polite">
+    <div id="previewHdr">NEXT WAVE</div>
+    <div id="previewRoster"></div>
+    <div id="previewThreats"></div>
+    <div id="previewBoss"></div>
   </div>
   <div id="rightControls">
     <button id="pause" aria-label="Pause">&#10073;&#10073;</button>
@@ -316,6 +426,7 @@
     </button>
   </div>
   <div id="toast"></div>
+  <div id="banner"><b></b><i></i></div>
 </div>
 
 <div class="overlay" id="upgradeOverlay">
@@ -328,6 +439,7 @@
       <div id="upgradeName">TOWER</div>
       <div id="upgradeMeta">LEVEL 1</div>
       <div id="upgradeCards"></div>
+      <div id="specRow"></div>
       <div id="upgradeActions">
         <button class="iconBtn" id="upgradeSell" aria-label="Sell tower">
           <img src="assets/btn_sell.png" alt=""></button>
@@ -414,7 +526,11 @@
   </div>
 </div>
 
+<script src="props-data.js"></script>
+<script src="towers-data.js"></script>
+<script src="fx-data.js"></script>
 <script src="map.js"></script>
+<script src="enemies.js"></script>
 <script src="game.js"></script>
 <script>
   // An enhancement, and guarded: a page that cannot boot without a service

@@ -37,7 +37,8 @@ const LEVELS = [
 
   { id:'palmrun', name:'THE LONG MEADOW', palette:'jungle', hp:0.96, seed:5514,
     props:320, decor:640, padGap:170,
-    roster:{ fodder:'goblin', fast:'wisp', heavy:'feline', boss:'warlord' },
+    roster:{ fodder:'goblin', fast:'wisp', heavy:'feline', boss:'warlord',
+             support:'phantom' },
     curve:'rush',
     control:[[-40,240],[210,220],[390,330],[430,540],[620,660],[830,600],
              [890,420],[1060,300],[1270,330],[1400,520],[1580,620]],
@@ -45,7 +46,8 @@ const LEVELS = [
 
   { id:'deepwood', name:'DUST ROAD', palette:'dunes', hp:0.76, seed:7712,
     props:340, decor:640, padGap:180,
-    roster:{ fodder:'raider', fast:'scorpion', heavy:'sentinel', boss:'matriarch' },
+    roster:{ fodder:'raider', fast:'scorpion', heavy:'sentinel', boss:'matriarch',
+             support:'bulwark' },
     curve:'siege',
     control:[[-40,180],[220,200],[400,320],[420,520],[600,640],[820,600],
              [900,430],[1080,330],[1290,380],[1420,560],[1580,660]],
@@ -53,7 +55,8 @@ const LEVELS = [
 
   { id:'millpond', name:'MILLPOND', palette:'marsh', hp:1.12, seed:41009,
     props:300, decor:600, padGap:186,
-    roster:{ fodder:'wisp', fast:'scorpion', heavy:'warden', boss:'warlord' },
+    roster:{ fodder:'wisp', fast:'scorpion', heavy:'warden', boss:'warlord',
+             support:'phantom' },
     curve:'swarm',
     control:[[-40,620],[220,640],[420,560],[500,380],[700,300],[900,380],
              [1000,560],[1180,640],[1360,560],[1460,380],[1580,300]],
@@ -61,7 +64,8 @@ const LEVELS = [
 
   { id:'frostgate', name:'FROSTGATE', palette:'snow', hp:0.70, seed:33144,
     props:260, decor:520, padGap:190,
-    roster:{ fodder:'goblin', fast:'raider', heavy:'warden', boss:'matriarch' },
+    roster:{ fodder:'goblin', fast:'raider', heavy:'warden', boss:'matriarch',
+             support:'shaman' },
     curve:'siege',
     control:[[-40,430],[200,440],[340,300],[540,250],[700,360],[760,570],
              [950,660],[1150,590],[1240,400],[1420,330],[1580,380]],
@@ -69,12 +73,38 @@ const LEVELS = [
 
   { id:'longroad', name:'ASHFALL', palette:'volcano', hp:0.82, seed:88231,
     props:280, decor:560, padGap:216,
-    roster:{ fodder:'wizard', fast:'feline', heavy:'ogre', boss:'demon' },
+    roster:{ fodder:'wizard', fast:'feline', heavy:'ogre', boss:'demon',
+             support:'bulwark' },
     curve:'standard',
     control:[[-40,160],[180,180],[300,360],[240,560],[380,700],[620,700],
              [740,540],[700,340],[860,220],[1080,240],[1180,420],[1120,620],
              [1300,720],[1480,620],[1580,440]],
     water:[{x:980,y:700,rx:140,ry:62,rot:-.1}] },
+
+  // The map-mechanics level. Two roads, entered from opposite corners, walked
+  // alternately — every tower that covers one of them covers none of the
+  // other, so the question stops being "where is the best spot" and becomes
+  // "how do I split what I have".
+  //
+  // It also bans the arcane tower, which is the splash answer to an armoured
+  // roster, while fielding one. Two mechanics on one map on purpose: this is
+  // the last level, and it should ask something the other six do not.
+  // Palette chosen for road-against-ground contrast rather than mood: `forge`
+  // was the first pick and its road and its dirt differ by six points of
+  // luminance, which on a map whose whole point is covering TWO roads made
+  // both of them nearly invisible. `ash` sits at fifty, about where jungle
+  // does, and jungle reads fine.
+  { id:'crossroads', name:'THE CROSSROADS', palette:'ash', hp:0.82, seed:61207,
+    props:300, decor:600, padGap:150,
+    roster:{ fodder:'goblin', fast:'scorpion', heavy:'sentinel', boss:'warlord',
+             support:'shaman' },
+    curve:'standard',
+    ban:['arcane'],
+    control:[[-40,180],[190,190],[360,270],[470,420],[640,470],[820,430],
+             [960,330],[1140,300],[1330,360],[1450,470],[1580,520]],
+    control2:[[-40,720],[200,700],[380,610],[500,640],[680,690],[880,660],
+              [1020,560],[1180,540],[1340,600],[1460,660],[1580,700]],
+    water:[{x:760,y:120,rx:150,ry:62,rot:.06}] },
 ];
 
 const levelById = id => LEVELS.findIndex(l => l.id === id);
@@ -190,7 +220,8 @@ const SPEC_COLOUR = {
 };
 
 function specUnlocked(t) {
-  return TRACK_ORDER.some(k => t.up[k] >= MAX_TRACK);
+  const need = owns('training') ? MAX_TRACK - 1 : MAX_TRACK;
+  return TRACK_ORDER.some(k => t.up[k] >= need);
 }
 function specOf(t) {
   return t.spec ? SPECS[t.type].find(x => x.id === t.spec) : null;
@@ -236,6 +267,19 @@ function upgradeCost(tower, track) {
 //               something has to burst it down.
 //   split       on death becomes N of another kind at the same point on the
 //               road. Killing it is not the end of it.
+//   heal        restores a fraction of every nearby enemy's maximum health a
+//               second, itself excluded. Damage that does not outpace it is
+//               wasted, so the shaman is the thing to shoot, not the thing in
+//               front of it.
+//   aura        every nearby enemy takes reduced damage while the carrier is
+//               alive. Unlike armour this applies to splash too, because the
+//               answer is meant to be killing the carrier rather than picking
+//               a damage type.
+//   untargetable
+//               towers pass over it while anything else is in range, so it
+//               cannot be picked out of a crowd — splash is what digs it out.
+//               Alone it is targeted normally, which is deliberate: see the
+//               note in the targeting loop for what happened when it was not.
 //
 // Without these, a roster swap is a reskin: the simulation showed six maps
 // reporting the same result to the wave when only their numbers differed.
@@ -251,12 +295,25 @@ const KINDS = {
   warden:   { hp:2.60, speed:0.62, size:92,  reward:2.2, armour:0.62, slowImmune:true },
   ogre:     { hp:2.30, speed:0.68, size:112, reward:2.4, armour:1,
               split:{ into:'goblin', n:2 } },
+  // Support. The three roles the brief lists that the roster had no answer to.
+  // Each one's value is in what it does for the enemies AROUND it, which makes
+  // target priority a decision for the first time: every other kind is worth
+  // shooting in the order it arrives, and these are worth shooting first.
+  shaman:   { hp:1.30, speed:0.86, size:92,  reward:2.2, armour:1,
+              heal:{ range:165, rate:0.055 } },
+  // Its aura multiplies whatever armour has already done — a siege roster's
+  // heavies are at 0.62 before it applies — so it is kept mild on purpose. At
+  // 0.62 the pair left 38% of a hit landing and made three levels unwinnable.
+  bulwark:  { hp:2.40, speed:0.66, size:104, reward:2.6, armour:0.66,
+              aura:{ range:150, reduce:0.80 } },
+  phantom:  { hp:0.90, speed:1.30, size:74,  reward:1.6, armour:1,
+              flying:true, slowImmune:true, untargetable:true },
   demon:    { hp:16.0, speed:0.55, size:158, reward:9.0, armour:0.85,
               boss:{ mech:'shield', pool:0.20, up:2600, gap:5200 } },
   warlord:  { hp:13.0, speed:0.70, size:150, reward:8.5, armour:0.78,
               boss:{ mech:'jam', range:240, jamFor:2600, gap:3600 } },
   matriarch:{ hp:14.5, speed:0.52, size:158, reward:9.0, armour:1,
-              boss:{ mech:'summon', n:2, gap:5000, cap:10 } },
+              boss:{ mech:'summon', n:2, gap:5000 } },
 };
 
 // ---------------------------------------------------------------- bosses ---
@@ -283,6 +340,16 @@ const KINDS = {
 // ogre's, both at boss scale. They read as distinct at size and want their
 // own sprites eventually.
 const BOSS_NAME = { shield:'SHIELDED', jam:'JAMS TOWERS', summon:'SUMMONS' };
+// Extra enemies a single wave can be given by summoning, however many
+// summoners are in it. See updateBoss for why this is not per boss.
+const SUMMON_BUDGET = 10;
+
+// How much SURVEYOR tightens pad spacing. -20 was the first guess and it found
+// two extra pads on some maps and NONE on deepwood, whose road happens to sit
+// just the wrong side of the threshold — an unlock that does nothing on one of
+// six levels is worse than no unlock. -40 gains between two and five on every
+// map in the campaign.
+const PAD_SURVEY = -40;
 
 // Waves are written in ROLES, and each level maps roles to kinds. One curve,
 // ten kinds, and a level fielding wisps and wardens is a different problem to
@@ -293,41 +360,57 @@ const BOSS_NAME = { shield:'SHIELDED', jam:'JAMS TOWERS', summon:'SUMMONS' };
 // wave is 8-20 fodder against 2-8 heavies. Changing the SHAPE of the wave
 // changes which slot matters, which is the lever the roster did not have.
 const CURVES = {
+  // Support appears on four waves of the fifteen, not on every wave from six.
+  // Scheduled on nearly every wave it was a flat tax: four levels went
+  // unwinnable on hard while the support units themselves measured fine.
+  // Sparse, each arrival is a thing to notice and shoot first, which is the
+  // whole point of the role.
+  //
   // The original. Fodder throughout, fast from wave 3, heavies from 5.
   standard: [
     { fodder:8 }, { fodder:12 }, { fodder:10, fast:4 }, { fodder:12, fast:6 },
-    { fodder:10, heavy:2 }, { fodder:14, fast:8 }, { fodder:12, fast:4, heavy:3 },
-    { fodder:16, fast:10 }, { fodder:10, heavy:5 }, { fodder:8, boss:1 },
-    { fodder:18, fast:12 }, { fodder:14, heavy:6 }, { fodder:16, fast:14, heavy:4 },
-    { fodder:20, fast:10, heavy:8 }, { fodder:12, heavy:6, boss:2 },
+    { fodder:10, heavy:2 }, { fodder:14, fast:8 },
+    { fodder:12, fast:4, heavy:3, support:1 },
+    { fodder:16, fast:10 }, { fodder:10, heavy:5, support:1 },
+    { fodder:8, boss:1 },
+    { fodder:18, fast:12, support:1 }, { fodder:14, heavy:6 },
+    { fodder:16, fast:14, heavy:4 },
+    { fodder:20, fast:10, heavy:8, support:2 }, { fodder:12, heavy:6, boss:2 },
   ],
   // Heavies from wave two and barely any fodder. Single-target damage matters
   // and splash has little to splash.
   siege: [
     { fodder:6 }, { heavy:2, fodder:4 }, { heavy:3, fodder:4 },
     { heavy:4, fast:3 }, { heavy:5, fodder:6 }, { heavy:5, fast:5 },
-    { heavy:5, fodder:5 }, { heavy:6, fast:4 }, { heavy:6, fodder:6 },
-    { heavy:3, boss:1 }, { heavy:7, fast:6 }, { heavy:8, fodder:6 },
-    { heavy:8, fast:8 }, { heavy:9, fodder:8 }, { heavy:6, boss:2 },
+    { heavy:5, fodder:5, support:1 }, { heavy:6, fast:4 },
+    { heavy:6, fodder:6, support:1 }, { heavy:3, boss:1 },
+    { heavy:7, fast:6, support:1 }, { heavy:8, fodder:6 },
+    { heavy:8, fast:8 }, { heavy:9, fodder:8, support:1 },
+    { heavy:6, boss:2 },
   ],
   // Almost nothing but fodder, in numbers. Splash and chain earn their cost.
   swarm: [
     { fodder:14 }, { fodder:20 }, { fodder:24, fast:4 }, { fodder:28, fast:6 },
-    { fodder:30 }, { fodder:26, fast:12 }, { fodder:34, fast:8 },
-    { fodder:38, fast:12 }, { fodder:30, heavy:3 }, { fodder:20, boss:1 },
-    { fodder:36, fast:12 }, { fodder:32, heavy:4 }, { fodder:38, fast:14 },
-    { fodder:40, fast:12 }, { fodder:24, heavy:5, boss:2 },
+    { fodder:30 }, { fodder:26, fast:12 }, { fodder:34, fast:8, support:1 },
+    { fodder:38, fast:12 }, { fodder:30, heavy:3, support:1 },
+    { fodder:20, boss:1 },
+    { fodder:36, fast:12, support:1 }, { fodder:32, heavy:4 },
+    { fodder:38, fast:14 }, { fodder:40, fast:12, support:2 },
+    { fodder:24, heavy:5, boss:2 },
   ],
   // Fast units front to back, with the fodder thinned out. Slowing matters,
   // and towers covering only one bend never get a second shot.
   rush: [
     { fast:8 }, { fast:12 }, { fast:14, fodder:4 }, { fast:18 },
-    { fast:16, heavy:2 }, { fast:22 }, { fast:20, fodder:8 },
-    { fast:26 }, { fast:18, heavy:4 }, { fast:12, boss:1 },
-    { fast:24, fodder:8 }, { fast:22, heavy:4 }, { fast:28 },
-    { fast:24, heavy:5 }, { fast:18, heavy:3, boss:2 },
+    { fast:16, heavy:2 }, { fast:22 }, { fast:20, fodder:8, support:1 },
+    { fast:26 }, { fast:18, heavy:4, support:1 },
+    { fast:12, boss:1 },
+    { fast:24, fodder:8, support:1 }, { fast:22, heavy:4 },
+    { fast:28 }, { fast:24, heavy:5, support:2 },
+    { fast:18, heavy:3, boss:2 },
   ],
 };
+
 const WAVES = CURVES.standard;
 
 function waveSpec(n) {
@@ -342,7 +425,45 @@ const KIND_NAME = {
   feline:'PROWLER', wizard:'WARLOCK', sentinel:'SENTINEL', warden:'WARDEN',
   ogre:'OGRE', demon:'DEMON LORD',
   warlord:'THE WARLORD', matriarch:'THE MATRIARCH',
+  shaman:'SHAMAN', bulwark:'BULWARK', phantom:'PHANTOM',
 };
+
+// ---------------------------------------------------------------- wagers ---
+//
+// An optional bet on the NEXT wave, taken during the rest between waves and
+// spent the moment it starts. Take one when you are ahead and want the tempo,
+// decline when you are not — which is the "meaningful spending decision" the
+// loop was missing: until now the only choice between waves was what to buy,
+// and buying is never a risk.
+//
+// Deliberately one per wave and never compulsory. The sim's builds take none,
+// so the balance table measures the game without them and a wager can only
+// ever be something a player reaches for, not a tax they have to beat.
+const WAGERS = {
+  swift:    { name:'SWIFT',    risk:'+30% SPEED',   pay:1.45, speed:1.30,
+              blurb:'They come faster.' },
+  hardened: { name:'HARDENED', risk:'-22% DAMAGE',  pay:1.50, tough:0.78,
+              blurb:'Your towers hit them softer.' },
+  horde:    { name:'HORDE',    risk:'+40% NUMBERS', pay:1.40, count:1.40,
+              blurb:'More of them.' },
+};
+const WAGER_ORDER = ['swift', 'hardened', 'horde'];
+
+// Wagers multiply together rather than being picked one at a time, because
+// DOUBLE OR NOTHING lets two run at once: two risks stacked, two payouts
+// multiplied. One slot without it, two with.
+function wagerSlots() { return owns('gambler') ? 2 : 1; }
+function wagerStack(list) {
+  const out = { pay:1, speed:1, tough:1, count:1 };
+  for (const id of list || []) {
+    const w = WAGERS[id];
+    out.pay *= w.pay;
+    if (w.speed) out.speed *= w.speed;
+    if (w.tough) out.tough *= w.tough;
+    if (w.count) out.count *= w.count;
+  }
+  return out;
+}
 
 const DEFAULT_ROSTER =
   { fodder:'goblin', fast:'scorpion', heavy:'ogre', boss:'demon' };
@@ -383,6 +504,7 @@ const S = {
   phase: 'ready',        // ready | spawning | clearing | done
   restLeft: 0,
   maxLives: 0, bossCalled: false,
+  wager: [], wagerLive: [], summonBudget: 0, roadTurn: -1,
   shakeUntil: 0, shakeMag: 0, leakUntil: 0,
   queue: [],             // enemy kinds still to spawn this wave
   spawnIn: 0,
@@ -393,11 +515,39 @@ const S = {
   dirty: true,
 };
 
+// ------------------------------------------------------------- workshop ---
+//
+// What gems are for. They accumulated for months and bought nothing, which is
+// the exact thing the brief warns against — a number that goes up is not
+// progression.
+//
+// Every one of these opens a way to PLAY rather than raising a number. The
+// closest to a stat is QUARTERMASTER, and even that is chosen so it buys a
+// fourth tower in the opening rather than a slightly better third one: the
+// interesting part is the shape of the opening, not the energy.
+//
+// Bought once, kept forever, and applied to every level including ones already
+// cleared — so a player who stalls on hard has something to do other than
+// retry the same run.
+const UNLOCKS = {
+  quartermaster: { name:'QUARTERMASTER', cost:30,
+    blurb:'Start every level with 90 more energy — enough for a fourth tower\nin the opening instead of a third.' },
+  training:      { name:'FIELD TRAINING', cost:45,
+    blurb:'Towers open their specialisation at two levels in a track instead\nof three, so a fork arrives early enough to shape the run.' },
+  surveyor:      { name:'SURVEYOR', cost:60,
+    blurb:'Every map is surveyed for more ground: build pads sit closer\ntogether, so there are more of them.' },
+  gambler:       { name:'DOUBLE OR NOTHING', cost:80,
+    blurb:'Take two wagers on the same wave. The risks stack and so does\nthe payout.' },
+};
+const UNLOCK_ORDER = ['quartermaster', 'training', 'surveyor', 'gambler'];
+
+function owns(id) { return !!(save.unlocks && save.unlocks[id]); }
+
 const SAVE_KEY = 'islanddefence.v2';
 const save = Object.assign(
   // stars: { levelId: 0-3 }. A level is unlocked once the one before it has
   // any stars at all, so a player who scrapes a win is never stuck.
-  { gems: 0, stars: {}, music: true, sound: true },
+  { gems: 0, stars: {}, unlocks: {}, music: true, sound: true },
   (() => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; }
            catch (_) { return {}; } })()
 );
@@ -437,6 +587,9 @@ const ENEMY_ART = {
   // Reused sheets at boss scale — see BOSS_NAME above.
   warlord:  { walk:'enemy_sentinel_walk.png', die:'enemy_sentinel_die.png', walkN:8, dieN:6 },
   matriarch:{ walk:'enemy_ogre_walk.png', die:'enemy_ogre_die.png', walkN:8, dieN:6 },
+  shaman:   { walk:'enemy_wizard_walk.png', die:'enemy_wizard_die.png', walkN:8, dieN:6 },
+  bulwark:  { walk:'enemy_sentinel_walk.png', die:'enemy_sentinel_die.png', walkN:8, dieN:6 },
+  phantom:  { walk:'enemy_wisp_walk.png', die:'enemy_wisp_die.png', walkN:8, dieN:6 },
 };const DIE_MS = 700;
 
 const bootBar = document.getElementById('bootBar');
@@ -650,11 +803,26 @@ function roleKind(role) {
   return r[role] || DEFAULT_ROSTER[role];
 }
 
+// Support is the one role a level may decline. Every curve schedules it, but a
+// roster that does not name one fields none — so the opening level can stay a
+// plain fight while later ones add a thing to shoot first.
+function hasRole(role) {
+  if (role !== 'support') return true;
+  const r = LEVELS[S.level].roster || DEFAULT_ROSTER;
+  return !!r.support;
+}
+
 function buildQueue(spec) {
   // Interleave the kinds rather than marching them out in blocks, so a wave
   // reads as a mixed group instead of four separate mini-waves.
+  // HORDE swells the ordinary ranks only. Bosses are not multiplied: three
+  // demons on wave ten is not a harder version of the same wave, it is a
+  // different and much worse one.
+  const mult = wagerStack(S.wagerLive).count;
   const pools = Object.entries(spec)
-    .flatMap(([role, n]) => Array(n).fill(roleKind(role)));
+    .filter(([role]) => hasRole(role))
+    .flatMap(([role, n]) => Array(role === 'boss' ? n : Math.round(n * mult))
+                              .fill(roleKind(role)));
   for (let i = pools.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pools[i], pools[j]] = [pools[j], pools[i]];
@@ -708,10 +876,13 @@ const THREATS = [
   { tag:'NO SLOW',  test: k => k.slowImmune },
   { tag:'REGEN',    test: k => k.regen > 0 },
   { tag:'SPLITS',   test: k => !!k.split },
+  { tag:'HEALER',   test: k => !!k.heal },
+  { tag:'SHIELDS',  test: k => !!k.aura },
+  { tag:'STEALTH',  test: k => !!k.untargetable },
 ];
 
 // Roles in the order they reach the player: fodder first, boss as punctuation.
-const ROLE_ORDER = ['fodder', 'fast', 'heavy', 'boss'];
+const ROLE_ORDER = ['fodder', 'fast', 'heavy', 'support', 'boss'];
 
 function curveFor() {
   return CURVES[LEVELS[S.level].curve] || CURVES.standard;
@@ -735,13 +906,54 @@ function threatsOf(n) {
   if (n < 1 || n > c.length) return out;
   const spec = c[n - 1];
   for (const role of ROLE_ORDER) {
-    if (!spec[role]) continue;
+    if (!spec[role] || !hasRole(role)) continue;
     const k = KINDS[roleKind(role)];
     for (const t of THREATS) {
       if (!t.boss && t.test(k)) out.add(t.tag);
     }
   }
   return out;
+}
+
+// Three chips, one selectable, cleared by tapping the one that is on. Only up
+// during the rest between waves: a bet on a wave already running is not a bet.
+function renderWagers() {
+  const bar = el('wagerBar');
+  const on = S.phase === 'ready' && S.wave + 1 <= WAVES.length;
+  bar.classList.toggle('show', on);
+  if (!on) { bar.innerHTML = ''; return; }
+  // Rebuilt only when the selection changes, so tapping is not fighting a DOM
+  // that is replaced underneath it every time energy ticks.
+  const key = S.wager.join(',');
+  if (bar.dataset.sel === key && bar.children.length) return;
+  bar.dataset.sel = key;
+  bar.innerHTML = '';
+  const slots = wagerSlots();
+  const hint = document.createElement('span');
+  hint.id = 'wagerHint';
+  hint.textContent = slots > 1 ? `RISK? ${S.wager.length}/${slots}` : 'RISK?';
+  bar.appendChild(hint);
+  for (const id of WAGER_ORDER) {
+    const w = WAGERS[id];
+    const held = S.wager.includes(id);
+    const b = document.createElement('button');
+    b.className = 'wager' + (held ? ' on' : '');
+    // Greyed rather than hidden once the slots are full: the player should see
+    // what they did not take.
+    if (!held && S.wager.length >= slots) b.classList.add('full');
+    b.innerHTML = `<span class="n">${w.name}</span>` +
+                  `<span class="r">${w.risk}</span>` +
+                  `<span class="p">+${Math.round((w.pay - 1) * 100)}% ENERGY</span>`;
+    b.addEventListener('click', () => {
+      if (held) S.wager = S.wager.filter(x => x !== id);
+      else if (S.wager.length < slots) S.wager = S.wager.concat(id);
+      else return;
+      S.dirty = true;
+      sfx(held ? 'sell' : 'build');
+      renderWagers();
+    });
+    bar.appendChild(b);
+  }
 }
 
 function renderPreview() {
@@ -758,7 +970,7 @@ function renderPreview() {
   // by kind rather than shown twice.
   const byKind = new Map();
   for (const role of ROLE_ORDER) {
-    if (!spec[role]) continue;
+    if (!spec[role] || !hasRole(role)) continue;
     const kind = roleKind(role);
     byKind.set(kind, (byKind.get(kind) || 0) + spec[role]);
   }
@@ -796,6 +1008,8 @@ function renderPreview() {
     tags.appendChild(e);
   }
 
+  renderWagers();
+
   // Only worth saying when it is far enough off to build for and close enough
   // to matter. Next wave already has its own BOSS tag.
   const away = bossIn(next);
@@ -812,6 +1026,17 @@ function startWave(manual) {
   }
   S.wave++;
   S.bossCalled = false;
+  // Locked in as the wave starts. S.wager is what is SELECTED, wagerLive is
+  // what the wave is actually running under — otherwise clearing the choice
+  // for the next wave would retroactively change the one in flight.
+  S.wagerLive = S.wager;
+  S.wager = [];
+  S.summonBudget = SUMMON_BUDGET;
+  if (S.wagerLive.length) {
+    const st = wagerStack(S.wagerLive);
+    banner(S.wagerLive.map(id => WAGERS[id].name).join(' + '),
+           '+' + Math.round((st.pay - 1) * 100) + '% ENERGY', true, 1400);
+  }
   S.queue = buildQueue(waveSpec(S.wave));
   S.phase = 'spawning';
   S.spawnIn = 0;
@@ -825,22 +1050,27 @@ function spawnInterval() {
 
 // Flyers cross the board in a straight line between the road's two ends, so
 // they need their own route length to know when they have left.
-function routeLen(kind) {
-  if (!KINDS[kind].flying) return S.map.length;
-  const p = S.map.path, a = p[0], b = p[p.length - 1];
+function routeOf(e) {
+  return (S.map.routes && S.map.routes[e.route || 0]) || S.map;
+}
+
+function routeLen(e) {
+  const r = routeOf(e);
+  if (!KINDS[e.kind].flying) return r.length;
+  const p = r.path, a = p[0], b = p[p.length - 1];
   return Math.hypot(b[0] - a[0], b[1] - a[1]);
 }
 
 function enemyPos(e) {
-  if (!KINDS[e.kind].flying) return pathPointAt(S.map, e.dist);
-  const p = S.map.path, a = p[0], b = p[p.length - 1];
+  if (!KINDS[e.kind].flying) return pathPointAt(S.map, e.dist, e.route);
+  const p = routeOf(e).path, a = p[0], b = p[p.length - 1];
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
   const t = Math.min(1, e.dist / len);
   return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t,
            angle: Math.atan2(b[1] - a[1], b[0] - a[0]) };
 }
 
-function spawn(kind, atDist) {
+function spawn(kind, atDist, route) {
   const k = KINDS[kind], d = DIFF[S.diff];
   // The next-wave panel says a boss is coming; this is it arriving. Announced
   // once per wave — a wave with two bosses should not announce twice.
@@ -852,22 +1082,33 @@ function spawn(kind, atDist) {
     shake(11, 260);
     sfx('boss');
   }
+  const w = wagerStack(S.wagerLive);
   const hp = (66 + S.wave * 30) * k.hp * d.hp * LEVELS[S.level].hp;
+  // Roads alternate strictly rather than being picked at random, so a level
+  // with two entrances always presents both and never rolls a wave down one
+  // of them by chance.
+  const roads = (S.map.routes && S.map.routes.length) || 1;
+  const road = route != null ? route : (roads > 1 ? (S.roadTurn = (S.roadTurn + 1) % roads) : 0);
   S.enemies.push({
-    kind, dist: atDist || 0, hp, maxHp: hp,
-    speed: BASE_SPEED * k.speed * d.speed,
+    kind, route: road, dist: atDist || 0, hp, maxHp: hp,
+    // HARDENED is a damage-taken multiplier rather than extra health, so the
+    // health bar still reads as the fraction of the enemy that is left.
+    tough: w.tough,
+    speed: BASE_SPEED * k.speed * d.speed * w.speed,
     slowUntil: 0, slowFactor: 1, hurtUntil: 0, wasSplit: false,
     burnUntil: 0, burnDps: 0, shatterUntil: 0, shatterMul: 1,
+    auraUntil: 0, auraMul: 1,
     bossNext: 0, shieldHp: 0, shieldMax: 0, shieldDownUntil: 0, jamTarget: null,
     summoned: 0,
-    reward: Math.round((7 + S.wave * 1.6) * k.reward),
+    reward: Math.round((7 + S.wave * 1.6) * k.reward * w.pay),
     anim: Math.random() * 1000,
     x: 0, y: 0, angle: 0,
   });
 }
 
 function waveCleared() {
-  const bonus = 40 + S.wave * 12;
+  const bonus = Math.round((40 + S.wave * 12) * wagerStack(S.wagerLive).pay);
+  S.wagerLive = [];
   S.energy += bonus;
   save.gems += 1;
   persist();
@@ -901,6 +1142,52 @@ function finish(won) {
 // Runs once a frame for anything carrying a boss block, AFTER its position is
 // known — jam needs to know which tower it is beside, and summon needs a point
 // on the road to drop children at.
+// Healing and damage-reduction auras, resolved for the whole field at once.
+//
+// Auras are stamped onto the enemies they cover with an expiry a few frames
+// out, rather than recomputed inside damage(). damage() is called from four
+// places — shots, splash, chain, burn ticks — and a shot resolving between
+// two updates has to see the aura that was up when it landed. A short-lived
+// mark does that with one pass here instead of a search per hit.
+//
+// Runs before positions update, so it uses last frame's coordinates: a
+// carrier that moved a few pixels does not change who is inside a 170px
+// radius, and paying for a second position pass would.
+const AURA_HOLD = 90;   // ms; comfortably longer than a frame at any rate
+
+function updateSupport(dt) {
+  let any = false;
+  for (const e of S.enemies) {
+    const k = KINDS[e.kind];
+    if (e.hp > 0 && (k.heal || k.aura)) { any = true; break; }
+  }
+  if (!any) return;
+
+  for (const src of S.enemies) {
+    if (src.hp <= 0) continue;
+    const k = KINDS[src.kind];
+    if (!k.heal && !k.aura) continue;
+    const r = (k.heal || k.aura).range;
+    const r2 = r * r;
+    for (const e of S.enemies) {
+      if (e === src || e.hp <= 0) continue;
+      const dx = e.x - src.x, dy = e.y - src.y;
+      if (dx * dx + dy * dy > r2) continue;
+      if (k.heal && e.hp < e.maxHp) {
+        e.hp = Math.min(e.maxHp, e.hp + e.maxHp * k.heal.rate * dt / 1000);
+      }
+      if (k.aura) {
+        // Strongest aura covering an enemy wins; they do not stack, or three
+        // bulwarks in a wave would make everything near them unkillable.
+        if (!(e.auraUntil > S.time) || k.aura.reduce < e.auraMul) {
+          e.auraMul = k.aura.reduce;
+        }
+        e.auraUntil = S.time + AURA_HOLD;
+      }
+    }
+  }
+}
+
 function updateBoss(e, b) {
   if (b.mech === 'shield') {
     // Raise, hold, drop, wait, raise. Bursting the pool down early ends the
@@ -939,18 +1226,22 @@ function updateBoss(e, b) {
   }
 
   if (b.mech === 'summon') {
-    // Capped over the boss's whole life, not just paced. Uncapped it summons
-    // for as long as it survives, and a slow boss survives a long time: the
-    // first version put out sixty extra enemies across one crossing and made
-    // both levels it was on unwinnable on EASY, dying at the wave it first
-    // appeared. A rate limit alone cannot bound that; a total can.
-    if (e.summoned >= b.cap) return;
+    // The cap is a budget for the WAVE, shared by every summoner in it, not an
+    // allowance each one gets.
+    //
+    // Per-boss it bounded a single summoner correctly and then the final wave
+    // of the siege curve fielded two, which doubled the flood and made both
+    // levels that use this boss unwinnable on hard — 0 of 27 runs, reaching
+    // wave 15 and dying there every time. That was not noise, and it is the
+    // second time the same lesson has been paid for here: bound the total the
+    // player actually faces, never the rate or the per-unit share.
+    if (S.summonBudget <= 0) return;
     // Behind itself, so the children have to walk the whole board the boss
     // already covered rather than appearing at the end of the road.
     const kind = roleKind('fodder');
-    for (let i = 0; i < b.n; i++) {
-      e.summoned++;
-      spawn(kind, Math.max(0, e.dist - 40 - i * 34));
+    for (let i = 0; i < b.n && S.summonBudget > 0; i++) {
+      S.summonBudget--;
+      spawn(kind, Math.max(0, e.dist - 40 - i * 34), e.route);
       S.enemies[S.enemies.length - 1].wasSplit = true;
     }
     S.fx.push({ kind:'boom', x:e.x, y:e.y - KINDS[e.kind].size * 0.35,
@@ -966,6 +1257,11 @@ function damage(e, amount, ignoreArmour) {
   // held on the tower, so every other tower's hits are amplified without any
   // of them needing to know an ice tower exists.
   if (e.shatterUntil && S.time < e.shatterUntil) amount *= e.shatterMul;
+  // An aura applies even to damage that ignores armour. Splash is the answer
+  // to an armoured roster; it is deliberately NOT the answer to a bulwark,
+  // whose answer is killing the bulwark.
+  if (e.auraUntil && S.time < e.auraUntil) amount *= e.auraMul;
+  if (e.tough !== 1) amount *= e.tough;
   let dealt = ignoreArmour ? amount : amount * (KINDS[e.kind].armour ?? 1);
   // A raised shield eats damage until its pool is gone, and armour does not
   // apply to it — the shield is the obstacle, not the hide behind it. Burst
@@ -1000,7 +1296,7 @@ function damage(e, amount, ignoreArmour) {
       // Spread the children along the road so they do not stack into one
       // sprite, and mark them so a split cannot cascade forever.
       for (let i = 0; i < k.split.n; i++) {
-        spawn(k.split.into, Math.max(0, e.dist - 14 + i * 28));
+        spawn(k.split.into, Math.max(0, e.dist - 14 + i * 28), e.route);
         S.enemies[S.enemies.length - 1].wasSplit = true;
       }
     }
@@ -1075,6 +1371,8 @@ function update(dt) {
     if (!S.queue.length) S.phase = 'clearing';
   }
 
+  updateSupport(dt);
+
   // One polyline lookup per enemy per frame; everything downstream reads the
   // cached x/y.
   for (const e of S.enemies) {
@@ -1097,7 +1395,7 @@ function update(dt) {
     const p = enemyPos(e);
     e.x = p.x; e.y = p.y; e.angle = p.angle;
     if (ek.boss) updateBoss(e, ek.boss);
-    if (e.dist >= routeLen(e.kind)) {
+    if (e.dist >= routeLen(e)) {
       e.hp = 0;
       e.leaked = true;
       S.lives--;
@@ -1117,12 +1415,27 @@ function update(dt) {
     if (t.jammedUntil > S.time) continue;
     const range = towerRange(t);
     let target = null, furthest = -1;
+    // Two passes. A phantom is passed over while there is anything else in
+    // range to shoot, and picked normally when there is not.
+    //
+    // The first version made it flatly untargetable, which the bench showed
+    // was unanswerable rather than hard: splash and chain only ever happen
+    // because a shot LANDED, so with nothing targetable no tower fires, no
+    // shot lands, and a wave of nothing but phantoms takes zero damage from
+    // every tower in the game at any upgrade level. Hiding in a crowd instead
+    // of hiding outright keeps the mechanic — splash is what digs them out of
+    // a wave — and can never produce an enemy that simply cannot be hit.
+    let ghost = null, ghostAt = -1;
     for (const e of S.enemies) {
       if (e.hp <= 0) continue;
-      if (e.dist > furthest && Math.hypot(t.x - e.x, t.y - e.y) <= range) {
-        furthest = e.dist; target = e;
+      if (Math.hypot(t.x - e.x, t.y - e.y) > range) continue;
+      if (KINDS[e.kind].untargetable) {
+        if (e.dist > ghostAt) { ghostAt = e.dist; ghost = e; }
+        continue;
       }
+      if (e.dist > furthest) { furthest = e.dist; target = e; }
     }
+    if (!target) target = ghost;
     if (!target) continue;
     t.angle = Math.atan2(target.y - t.y, target.x - t.x);
     if (t.cool > 0) continue;
@@ -1419,6 +1732,29 @@ function drawCorpses() {
 }
 
 function drawEnemies() {
+  // Support rings first, under every sprite, so a healer's reach reads as
+  // ground it covers rather than as decoration on one figure. A player who
+  // cannot see the radius cannot make the decision the radius exists for.
+  for (const e of S.enemies) {
+    const k = KINDS[e.kind];
+    const sup = k.heal || k.aura;
+    if (!sup || e.hp <= 0) continue;
+    const heal = !!k.heal;
+    ctx.save();
+    ctx.translate(e.x, e.y + 4);
+    ctx.scale(1, 0.44);
+    ctx.beginPath();
+    ctx.arc(0, 0, sup.range, 0, Math.PI * 2);
+    ctx.globalAlpha = 0.11 + 0.05 * Math.sin(S.time / 420);
+    ctx.fillStyle = heal ? '#6ce07a' : '#c9a227';
+    ctx.fill();
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = heal ? '#8bf39a' : '#e8c24a';
+    ctx.stroke();
+    ctx.restore();
+  }
+
   for (const e of S.enemies) {
     const k = KINDS[e.kind];
     const anim = RUN_FRAMES[e.kind];
@@ -1431,6 +1767,11 @@ function drawEnemies() {
       ctx.shadowColor = '#8deaff';
       ctx.shadowBlur = 14;
     }
+    // Faded and drifting, because towers ignoring it entirely looks like a
+    // targeting bug unless the thing they ignore is visibly not all there.
+    if (k.untargetable) {
+      ctx.globalAlpha = 0.42 + 0.16 * Math.sin(S.time / 260 + e.anim);
+    }
     blitEnemy(anim, e.kind, e.x, e.y, e.angle, frame);
     const flash = FLASH_FRAMES[e.kind];
     if (flash && S.time < e.hurtUntil) {
@@ -1438,6 +1779,18 @@ function drawEnemies() {
       blitEnemy(flash, e.kind, e.x, e.y, e.angle, frame);
     }
     ctx.restore();
+
+    if (e.auraUntil > S.time) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#e8c24a';
+      ctx.beginPath();
+      ctx.arc(e.x, e.y + k.size * 0.20 - k.size * 0.5, k.size * 0.42,
+              0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // A raised shield has to be unmistakable: it is the reason damage is not
     // landing, and a player who cannot see it just thinks their towers broke.
@@ -1559,9 +1912,19 @@ const el = id => document.getElementById(id);
 const hud = el('hud');
 const slotsWrap = el('towerSlots');
 
+// A level may forbid tower types outright. Cheaper than any other map
+// mechanic and the one with the most effect on a build: a map that bans the
+// splash tower is a different problem to the same map without the ban, and no
+// amount of energy buys around it.
+function banned(type) {
+  const b = LEVELS[S.level] && LEVELS[S.level].ban;
+  return !!(b && b.includes(type));
+}
+
 function buildSlots() {
   slotsWrap.innerHTML = '';
   for (const type of TOWER_ORDER) {
+    if (banned(type)) continue;
     const def = TOWERS[type];
     const b = document.createElement('button');
     b.className = 'slot' + (type === S.selectedType ? ' selected' : '');
@@ -1788,13 +2151,19 @@ function newRun(levelIndex, diff) {
   S.diff = diff;
   // Build the geometry, then composite the map once. Everything after this
   // reads S.map for the path and pads and blits S.baked for the picture.
-  S.map = buildLevel(LEVELS[levelIndex], MAP_W, MAP_H);
+  // SURVEYOR tightens the pad spacing rather than adding pads by hand, so the
+  // extra ones land where the geometry already wanted one and never in the
+  // water or across the road. See derivePads: the adjustment has to move the
+  // along-road step as well as the between-pad gap, or it finds nothing.
+  S.map = buildLevel(LEVELS[levelIndex], MAP_W, MAP_H,
+                     owns('surveyor') ? PAD_SURVEY : 0);
   S.baked = renderLevel(S.map, makeCanvas);
   const d = DIFF[diff];
-  S.energy = d.energy;
+  S.energy = d.energy + (owns('quartermaster') ? 90 : 0);
   S.lives = d.lives;
   S.maxLives = d.lives;
   S.shakeUntil = 0; S.shakeMag = 0; S.leakUntil = 0;
+  S.wager = []; S.wagerLive = []; S.roadTurn = -1;
   S.score = 0;
   S.wave = 0;
   S.phase = 'ready';
@@ -1802,7 +2171,7 @@ function newRun(levelIndex, diff) {
   S.queue = [];
   S.towers = []; S.enemies = []; S.shots = []; S.fx = []; S.corpses = [];
   S.openTower = null;
-  S.selectedType = 'fire';
+  S.selectedType = TOWER_ORDER.find(t => !(LEVELS[levelIndex].ban || []).includes(t)) || 'fire';
   S.speed = 1;
   S.time = 0;
   S.dirty = true;
@@ -1899,6 +2268,41 @@ function openLevels() {
   pushBack();
 }
 
+function openShop() {
+  renderShop();
+  show('shopOverlay', true);
+  pushBack();
+}
+
+function renderShop() {
+  el('shopGems').textContent = `${save.gems} GEM${save.gems === 1 ? '' : 'S'}`;
+  const list = el('shopList');
+  list.innerHTML = '';
+  for (const id of UNLOCK_ORDER) {
+    const u = UNLOCKS[id];
+    const had = owns(id);
+    const afford = save.gems >= u.cost;
+    const row = document.createElement('button');
+    row.className = 'shopRow' + (had ? ' owned' : afford ? '' : ' poor');
+    row.disabled = had || !afford;
+    row.innerHTML =
+      `<span class="txt"><span class="n">${u.name}</span>` +
+      `<span class="d">${u.blurb}</span></span>` +
+      `<span class="buy">${had ? 'OWNED' : u.cost + ' \u25c6'}</span>`;
+    row.addEventListener('click', () => {
+      if (owns(id) || save.gems < u.cost) return;
+      save.gems -= u.cost;
+      save.unlocks[id] = true;
+      persist();
+      sfx('win');
+      toast(`${u.name} UNLOCKED`);
+      renderShop();
+      syncMenu();
+    });
+    list.appendChild(row);
+  }
+}
+
 function toMenu() {
   S.screen = 'menu';
   S.running = false;
@@ -1907,6 +2311,7 @@ function toMenu() {
   show('upgradeOverlay', false);
   show('diffOverlay', false);
   show('levelOverlay', false);
+  show('shopOverlay', false);
   show('menu', true);
   syncMenu();
 }
@@ -1951,6 +2356,7 @@ function tapBoard(clientX, clientY) {
   }
   if (pick < 0) return;
 
+  if (banned(S.selectedType)) return;
   const def = TOWERS[S.selectedType];
   if (S.energy < def.cost) { toast('NOT ENOUGH ENERGY'); return; }
   S.energy -= def.cost;
@@ -1997,6 +2403,8 @@ el('upgradeSell').addEventListener('click', () => {
 });
 
 el('menuPlay').addEventListener('click', () => { audio(); openLevels(); });
+el('menuShop').addEventListener('click', () => { audio(); openShop(); });
+el('shopClose').addEventListener('click', () => show('shopOverlay', false));
 el('levelClose').addEventListener('click', () => show('levelOverlay', false));
 for (const b of document.querySelectorAll('.diffBtn')) {
   b.addEventListener('click', () => newRun(S.level, b.dataset.diff));
@@ -2033,6 +2441,7 @@ function pushBack() {
 }
 function closeTopmost() {
   if (el('upgradeOverlay').classList.contains('show')) { closeUpgrade(); return true; }
+  if (el('shopOverlay').classList.contains('show')) { show('shopOverlay', false); return true; }
   if (el('diffOverlay').classList.contains('show')) {
     show('diffOverlay', false); return true;
   }

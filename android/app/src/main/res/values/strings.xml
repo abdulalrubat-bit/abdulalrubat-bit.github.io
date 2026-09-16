@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Island Defence</string>
+    <string name="app_name">Last Isle</string>
 
     <!-- Declares which web origin this app claims. The matching half lives at
          https://abdulalrubat-bit.github.io/.well-known/assetlinks.json and

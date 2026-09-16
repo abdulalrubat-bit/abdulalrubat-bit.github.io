@@ -1,4 +1,4 @@
-# Island Defence — Android
+# Last Isle: Tower Defense — Android
 
 A **Trusted Web Activity**: an Android app whose entire content is the live
 page at `https://abdulalrubat-bit.github.io/towerdefence/`, opened in Chrome
@@ -65,7 +65,7 @@ and a debug APK, so it is worth pushing before you have a key.
 ## 3. Build
 
 The **Android** workflow runs on any push touching `android/`, or from
-Actions → Android → Run workflow. Download `island-defence-android` from the
+Actions → Android → Run workflow. Download `last-isle-android` from the
 run. It contains:
 
 - `app-release.aab` — what Play wants
@@ -86,7 +86,7 @@ does not exist until you have uploaded once.
 
 ## Things to check before the first upload
 
-- **`applicationId` is `com.fatefulgames.islanddefence`** in `app/build.gradle`.
+- **`applicationId` is `com.fatefulgames.lastisle`** in `app/build.gradle`.
   It cannot be changed after the first upload. If your Play account already
   uses a different prefix, change it now.
 - **`targetSdk` is 35.** Play raises the minimum every August; if it rejects

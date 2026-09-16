@@ -11,13 +11,13 @@ def keystoreFile = rootProject.file('app/release.keystore')
 def hasSigning = keystoreFile.exists() && System.getenv('KEYSTORE_PASSWORD')
 
 android {
-    namespace 'com.fatefulgames.islanddefence'
+    namespace 'com.fatefulgames.lastisle'
     compileSdk 35
 
     defaultConfig {
         // CHANGE THIS if your Play account already uses a different prefix —
         // an applicationId cannot be altered after the first upload.
-        applicationId "com.fatefulgames.islanddefence"
+        applicationId "com.fatefulgames.lastisle"
         minSdk 21
         targetSdk 35
         versionCode 1

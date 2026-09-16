@@ -1,5 +1,20 @@
 # Digital Asset Links
 
+**The game does not live in this repository.** It is at
+[abdulalrubat-bit/Last-Isle-Tower-Defense](https://github.com/abdulalrubat-bit/Last-Isle-Tower-Defense),
+published to <https://abdulalrubat-bit.github.io/Last-Isle-Tower-Defense/>.
+
+This one file stayed behind because it has to. Digital Asset Links are read
+from the ORIGIN root — `abdulalrubat-bit.github.io/.well-known/assetlinks.json`
+— and only the user-site repository can publish that path; a project
+repository publishes under a subdirectory. So the app lives over there and its
+half of the handshake lives here.
+
+`.nojekyll` beside it is not optional either: GitHub Pages runs Jekyll by
+default and Jekyll drops paths beginning with a dot, which would leave this
+file unpublished with no symptom other than an Android app that never stops
+showing its URL bar.
+
 `assetlinks.json` is the site's half of the handshake that lets the Android app
 open this origin without a URL bar. The app's half is in
 `android/app/src/main/res/values/strings.xml`. Both must agree.

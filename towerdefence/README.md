@@ -145,6 +145,125 @@ on the ground under it. Text does not work there: the map draws at about a
 fifth of size on a phone, so a thirteen-pixel badge becomes four and its
 letters become nothing.
 
+## Permanent progression
+
+Gems — one a wave, five a level — buy four permanent unlocks from the workshop
+on the menu. Kept forever and applied to every level including ones already
+cleared, so a player stuck on hard has something to do other than retry.
+
+| unlock | gems | opens |
+|---|---|---|
+| **QUARTERMASTER** | 30 | +90 starting energy — a *fourth* tower in the opening, not a better third |
+| **FIELD TRAINING** | 45 | specialisations at two levels in a track instead of three |
+| **SURVEYOR** | 60 | tighter pad spacing on every map (2–5 more pads) |
+| **DOUBLE OR NOTHING** | 80 | two wagers on one wave, risks and payouts multiplied |
+
+215 gems for all four against roughly 120 for a campaign — the second run is
+the point. None of them raises a number for its own sake; the closest is
+QUARTERMASTER, chosen so it changes the *shape* of the opening.
+
+**SURVEYOR took three tries to do anything at all.** `derivePads` has two
+independent constraints: `minGap` (how far a new pad must be from existing
+ones) and a step along the road deciding how often a pad is even considered.
+Lowering only `minGap` found zero extra pads on every map, because the step was
+the thing saying no. With both moving, −20 still found none on `deepwood`,
+whose road sits just the wrong side of the threshold. −40 gains two to five on
+every map. An unlock that does nothing on one of seven levels is worse than no
+unlock.
+
+Unlocks are off by default and the simulation buys none, so the balance table
+measures the game without them.
+
+## Map mechanics
+
+A level may declare a **second road** in `control2`. Enemies alternate between
+roads strictly rather than randomly, so a two-entrance map always presents both
+and never rolls a wave down one of them by chance. A level may also **ban
+tower types** — the cheapest mechanic here and the one with most effect on a
+build, since no amount of energy buys around a missing splash tower.
+
+`THE CROSSROADS` uses both. Routes live behind `pathPointAt`: `routes` is the
+array everything reads, and `path` / `seg` / `length` remain aliases to the
+first, so every single-road level is untouched. Pads come off every road and
+must clear all of them; splitters and summoners put children on the parent's
+road.
+
+Three things to know before adding another:
+
+- **The sim's bot places towers directly**, not through the tap handler, so it
+  will build a banned tower unless told not to. It is told not to now.
+- **Check road-against-ground contrast before picking a palette.** `forge` has
+  six points of luminance between its road and its dirt, which on a map about
+  covering two roads made both nearly invisible. `ash` is fifty, about where
+  jungle sits.
+- **A two-road level is violently sensitive to `hp`.** 0.58 gave 21 of 27 wins
+  on hard where the campaign runs 1 to 4 of 9; correcting to 1.25 walled it on
+  *easy* at 2 of 27. It sits at 0.82. Bisect, and re-run with `--runs 3`.
+
+## Wagers
+
+A bet on the next wave, taken during the rest and spent the moment it starts.
+
+| wager | risk | pays |
+|---|---|---|
+| **SWIFT** | +30% enemy speed | +45% energy |
+| **HARDENED** | −22% damage dealt to them | +50% energy |
+| **HORDE** | +40% enemy numbers | +40% energy |
+
+One per wave and never compulsory — take one when you are ahead and want the
+tempo, decline when you are not. Until this existed the only choice between
+waves was what to buy, and buying is never a risk.
+
+Two rules that matter:
+
+- **HORDE swells the ordinary ranks, not the boss count.** Three demons on
+  wave ten is not a harder version of that wave, it is a different and much
+  worse one.
+- **The bet is locked at wave start.** `S.wager` is what is selected;
+  `S.wagerLive` is what the wave in flight is running under. Without the pair,
+  choosing for the next wave would retroactively change the current one.
+
+None of the simulation's builds take a wager, so the balance table measures
+the game without them and a wager can only be something a player reaches for,
+never a tax they have to beat.
+
+## Support enemies
+
+Three roles whose value is in what they do for the enemies *around* them, which
+is what makes target priority a decision. Every other kind is worth shooting in
+the order it arrives; these are worth shooting first.
+
+| kind | does | the answer |
+|---|---|---|
+| **SHAMAN** | heals every nearby enemy a little each second | out-damage the heal, or kill the shaman |
+| **BULWARK** | nearby enemies take reduced damage while it lives | kill it — splash does *not* bypass an aura the way it bypasses armour |
+| **PHANTOM** | towers pass over it while anything else is in range | splash, to dig it out of the crowd it hides in |
+
+`support` is a fifth wave role alongside fodder / fast / heavy / boss. Every
+curve schedules it on four waves of fifteen, and a level opts in by naming one
+in its roster — a roster with no `support` fields none, which is why the
+opening level stays a plain fight.
+
+Two numbers here are load-bearing:
+
+- **The bulwark's aura multiplies whatever armour already did.** A siege
+  roster's heavies sit at 0.62 before it applies; pairing that with a 0.62 aura
+  left 38% of a hit landing and made three levels unwinnable on hard. It stays
+  mild deliberately.
+- **Support on nearly every wave is a flat tax, not a mechanic.** Scheduled
+  from wave six onward it put four levels out of reach on hard while the units
+  themselves measured fine in isolation. Sparse, each arrival is a thing to
+  notice.
+
+**The phantom was unanswerable on its first cut** and `tools/specs.mjs`-style
+benching is the only reason that was caught. Made flatly untargetable, it took
+*zero* damage from every tower in the game at any upgrade level — because
+splash and chain only ever fire as a consequence of a shot landing, so with
+nothing targetable no tower shoots, no shot lands, and there is no splash. It
+now hides *in a crowd* rather than outright: alone it is targeted normally,
+which keeps the mechanic (splash digs it out) and makes an unhittable enemy
+impossible to construct.
+
 ## Bosses
 
 Three, one mechanic each, spread across the campaign as part of a level's
@@ -159,10 +278,13 @@ roster:
 The next-wave panel warns three waves out with the mechanic's name, derived
 from the boss kind rather than written per level.
 
-**SUMMON must stay capped over the boss's whole life, not merely paced.**
-Uncapped it put out sixty extra enemies in one crossing and made both levels
-it appeared on unwinnable on *easy*. A slow boss survives a long time, so a
-rate limit cannot bound the total; only a total can.
+**SUMMON's cap is a budget for the WAVE, shared by every summoner in it.**
+This has now been paid for twice. Uncapped it put out sixty extra enemies in
+one crossing and made both its levels unwinnable on *easy*. Capped per boss it
+bounded a single summoner correctly — and then the siege curve's final wave
+fielded two, doubled the flood, and took both levels that use that boss to
+**0 of 27 runs** on hard, reaching wave 15 and dying there every time. Bound
+the total the player actually faces; never the rate, never the per-unit share.
 
 `node tools/bosses.mjs` benches each mechanic in isolation. Read the SHIELD
 pair: chipping leaves the pool up for hundreds of frames across several cycles
@@ -272,17 +394,18 @@ spawn point, or towers that can be repositioned, would each add one.
 ## Balance
 
 Simulation-checked, not guessed. `tools/sim.mjs` runs the real `game.js`
-headlessly through all six maps, three difficulties and nine build strategies
-— 162 runs in under a minute.
+headlessly through all seven maps, three difficulties and nine build
+strategies — 189 runs in a couple of minutes.
 
 ```
 level           easy         normal        hard
-1. landing      9/9 win 25/25 9/9 win 13/20 3/9 win 8/18
-2. palmrun      9/9 win 25/25 7/9 win 17/20 4/9 win 10/18
-3. deepwood     9/9 win 24/25 7/9 win 16/20 1/9 win 7/18
-4. millpond     9/9 win 24/25 7/9 win 18/20 4/9 win 14/18
-5. frostgate    9/9 win 24/25 6/9 win 14/20 3/9 win 3/18
-6. longroad     9/9 win 25/25 6/9 win 20/20 4/9 win 15/18
+1. landing      9/9 win 23/25 8/9 win 11/20 4/9 win 7/18
+2. palmrun      9/9 win 22/25 7/9 win 12/20 2/9 win 4/18
+3. deepwood     9/9 win 25/25 7/9 win 15/20 0/9 · w15
+4. millpond     9/9 win 22/25 7/9 win 14/20 3/9 win 8/18
+5. frostgate    9/9 win 25/25 5/9 win 15/20 1/9 win 1/18
+6. longroad     9/9 win 25/25 7/9 win 14/20 1/9 win 3/18
+7. crossroads   7/9 win 22/25 6/9 win 11/20 1/9 win 3/18
 ```
 
 Easy is comfortable, normal is cleared by most builds, hard is tight and
@@ -290,9 +413,16 @@ winnable on every map. Read it as a spread: a level nothing clears is a wall,
 a level everything clears is not asking anything.
 
 **The sweep is noisy.** The wave queue is shuffled, so repeating it on
-unchanged code moves each strategy by about two runs in eighteen. A one-run
-lead means nothing. What is worth acting on is a build or a fork that wins
-nearly everything, or nearly nothing.
+unchanged code moves each strategy by about two runs in eighteen, and a level
+sitting near the edge on hard can read 0/9 one run and 3/9 the next. A one-run
+lead means nothing.
+
+**Before believing a level is a wall, re-run it with `--runs 3`.** The
+difference is not subtle once you do: `deepwood` and `frostgate` came back
+0 of 27 on hard — a real wall, fixed by making the summon cap a wave budget —
+while `longroad` read 0/9 in the same sweep and 3/27 over three runs, which is
+just noise. One of those needed a code change and the other needed nothing,
+and a single sweep cannot tell them apart.
 
 Four things the simulation found that reading the code would not have:
 
@@ -467,21 +597,15 @@ Deliberate omissions, not oversights:
   from the pack's JPEGs by keying the black surround — good, but inferred.
   See **Dropping in the real art** above. This no longer touches backgrounds,
   only towers, enemies and UI.
-- **Gems accumulate and buy nothing.** One per wave cleared, five per level.
-  They are the obvious hook for permanent progression and currently a number
-  that goes up. Either spend them or remove them.
 - **Bosses do not change which build wins.** They have real mechanics now, but
   at two boss waves in fifteen the other thirteen decide the run. Moving that
   needs bosses to be more central — more boss waves, or a mechanic that
   persists past the boss's death — not more mechanics.
 - **Two bosses wear borrowed art.** Warlord is the sentinel's sheet and
   matriarch the ogre's, both at boss scale.
-- **Maps differ by geometry, roster and curve only.** No conveyor, no second
-  entrance, no hazard, no tower restriction. The renderer also has no
-  elevation, so cliffs, bridges and crossing roads all need height support it
-  does not have.
-- **No risk/reward wager.** Calling a wave early for +3 energy a second is the
-  only one in the game.
+- **The renderer has no elevation.** Cliffs, bridges and roads that cross are
+  all off the table until it understands height. Second entrances and tower
+  bans exist; conveyors and hazards do not.
 - **No music.** The toggle persists and the sound effects are synthesised
   oscillators — there are no audio assets in the pack at all.
 - **No achievements.** The pack has a window for them; nothing opens it,

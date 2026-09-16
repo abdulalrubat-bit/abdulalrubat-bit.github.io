@@ -19,6 +19,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Secrets are lifted to job-level env because a step's `if:` cannot read
+    # the `secrets` context at all — it is not in the list of contexts allowed
+    # there, and using it does not fail the step, it fails the whole WORKFLOW
+    # before any job starts. `env` at job level IS readable from a step `if`,
+    # which is what makes the guards below work.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,23 +46,14 @@ jobs:
       # The keystore never exists in the repository. It arrives as a base64
       # secret, is written outside any tracked path's reach for the length of
       # the job, and the passwords stay in the environment.
-      # `env.X` in a step condition reads job-level env, not this step's own,
-      # so the first version of this check was always false and never restored
-      # anything. `secrets` is readable from a step `if`; this is.
       - name: Restore signing key
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
           echo "signing key restored ($(stat -c%s android/app/release.keystore) bytes)"
 
       - name: Build release bundle
         working-directory: android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle --no-daemon bundleRelease
 
       # A sideloadable APK as well as the bundle, because an .aab cannot be
@@ -62,18 +63,16 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
-      # The secret is passed as an env var and only ever tested for emptiness.
-      # Interpolating it into the script body with ${{ }} would paste its value
-      # into the shell, which is how secrets end up in logs.
+      # KEYSTORE_PASSWORD is already in the job env and is only ever tested for
+      # emptiness here. Interpolating a secret into the script body with ${{ }}
+      # would paste its value into the shell, which is how secrets reach logs.
       - name: Say what came out
-        env:
-          SIGNED: ${{ secrets.KEYSTORE_PASSWORD != '' }}
         run: |
           echo "### Android build" >> "$GITHUB_STEP_SUMMARY"
           find android/app/build/outputs \( -name '*.aab' -o -name '*.apk' \) -print | while read -r f; do
             echo "- \`${f#android/app/build/outputs/}\` — $(du -h "$f" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
           done
-          if [ "$SIGNED" != "true" ]; then
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "The bundle is **unsigned** — no signing secrets are set. See \`android/README.md\`." >> "$GITHUB_STEP_SUMMARY"
           fi

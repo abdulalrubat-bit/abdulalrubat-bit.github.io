@@ -60,6 +60,9 @@ src/combat.js       guns, wreckage, the tractor beam
 src/radar.js        the holographic dial, and touch-to-command
 src/controls.js     the floating stick, the throttle, the trigger
 src/galaxy.js       the galaxy map: Voronoi territory, lanes, census, courses
+src/gear.js         modules, slots and the effective-stat recalculation
+src/missions.js     contracts, generated from what is already true
+src/dock.js         the station panel: selling, and the board
 src/world.js        what the AI is allowed to ask, and who answers
 src/persistence.js  localForage bridge and the snapshot
 src/saveWorker.js   serialise and encrypt, off the main thread
@@ -740,6 +743,303 @@ enabled and stable"*. The only symptom was that clicking did nothing.
 | Page errors across the whole run | none |
 | d3-delaunay | 19 KB, shipped size now 3.80 MB over 27 files |
 
+## Contracts, and the fact that nobody could sell anything
+
+### The hole nobody had noticed
+
+Until this build the player could not sell a single unit of anything. Mining
+worked, the hold filled, prices moved against stock, and NPC freighters traded
+all day long — and the one ship with a person aboard had no way to open its
+cargo doors. You could fly to a station and look at it. `trade()` existed and
+only the AI's TRADE order ever called it.
+
+That is also why haulage contracts could not exist: there was nothing to
+deliver *to*. So docking came first, and contracts came with it.
+
+Docking is 150 metres clear of the station's hull and a button that appears on
+its own. A docking ring you have to hit exactly is a precision task at the end
+of a journey, which is the least interesting place to put one.
+
+### A contract has to describe something already true
+
+The rule the whole generator is built on: not "kill four pirates somewhere" but
+"kill four pirates in The Sill, where there are in fact four pirates right
+now". Not "deliver ore" but "deliver ore to Gate Watch, which is in fact short
+of it".
+
+This costs nothing. The numbers it needs — who is where, what each station is
+holding — are already simulated every tick for the out-of-sector economy. The
+board just reads them. And it means the board *cannot* offer something nobody
+could complete, which is the failure mode of generating the other way round:
+roll a type, invent a target to fit it, and sooner or later you send the player
+to clear pirates out of an empty sector.
+
+Four kinds of work:
+
+| | what it is | where it comes from |
+|---|---|---|
+| **Bounty** | destroy N hostile hulls in a named sector | sectors that have them, never more than two-thirds of the count |
+| **Sweep** | destroy N hostile emplacements | the blockades that actually exist |
+| **Haulage** | carry goods to a named station and dock | that station's real shortage |
+| **Escort** | see a freighter to another sector | a real freighter, spawned, flying the route on ordinary JUMP orders |
+
+Bounties never ask for more than two-thirds of a sector's hostiles, because a
+contract needing every single one fails the moment one wanders off down a lane,
+which they do constantly. The escort is the only contract that creates
+something, and what it creates is a real hull with a real faction and the same
+orders any NPC uses — an escort mission whose subject is a marker that
+teleports on success is a timer with a story attached.
+
+### The board was four haulage runs
+
+First board this generated: four haulage contracts and nothing else.
+
+Drawing from one weighted pool looks correct and is not. There is one bounty
+candidate per sector that has hostiles and one sweep candidate per sector that
+has guns — but there is a haulage candidate for *every good at every station*,
+so haulage outnumbered everything else about four to one before any weighting
+happened. The galaxy was asked "what is most worth saying" and answered
+"cargo", four times, because cargo had four times as many mouths.
+
+The fix is to pick a TYPE first, weighted by its strongest candidate, then pick
+within it. A sector with six pirates still shouts louder than a station mildly
+short of ore; taking a type halves its weight rather than removing it, so two
+bounties on one board are possible when the galaxy really is that violent and
+unlikely otherwise.
+
+### Measured
+
+| | |
+|---|---|
+| Selling | 20 ore → 280 cr, hold emptied, station stock rose |
+| Bounty | 2 kills, progress ticked 1/2, paid 680 cr, cleared |
+| Sweep | 2 emplacements, paid 1440 cr, cleared |
+| Haulage | pays on docking at the addressed station, deducts the cargo |
+| Escort | real freighter spawned with a real JUMP order to the contracted sector |
+| Contracts across a reload | survive; boards do not |
+
+Boards are deliberately not saved. A board is an offer, and an offer that
+survives a reload is a save-scum: quit, reload, get a different four. They are
+regenerated from the galaxy's own state on the next dock, which is where they
+came from in the first place.
+
+## Phase 0: four ways the save was lying
+
+Written against the build plan's Phase 0, and three of its five items turned
+out to be live bugs rather than hardening.
+
+**Asteroid depletion was global.** One flat array, taken from whichever belt
+happened to be loaded and restored onto whichever belt happened to be loaded
+next. Harmless while the player could not leave Tarpon Reach; silent corruption
+the moment they could. Mine a seam at home, jump to The Sill, save — and The
+Sill's rocks come back wearing Tarpon Reach's holes. Depletion is a table keyed
+by sector now, folded in when you jump out of a sector and applied when you
+arrive.
+
+**Nothing saved when the app was backgrounded.** Backgrounding is the normal
+way to stop playing on a phone and it does not announce itself — there is no
+quit button to hang a save off, so up to a full autosave interval of play was
+simply lost, and the player's evidence for that was a mined seam that came
+back. `visibilitychange` and `pagehide` now flush.
+
+**The save worker had a fallback that did not exist.** `onerror` rejected every
+in-flight request with a comment saying the caller would fall back, and no
+caller did, because there was nothing to fall back *to*. Those rejections
+became "SAVE FAILED" and the game quietly stopped saving. There is now a
+main-thread pack/unpack behind the same key, used once and then permanently
+once the worker is known dead. It costs a few dropped frames, which is a worse
+outcome than a dropped frame only until you compare it with losing the save.
+
+**`autosave()` swallowed its own promise**, so `await autosave()` resolved
+before anything was written. Harmless in the game; it made a test reload
+mid-write and report that contracts were not being saved when they were.
+
+And one the plan named that had grown since: **the shell list was
+hand-written**. `src/` was enumerated by hand while `vendor/` was walked, on the
+argument that vendor was the part most likely to gain a file and least likely
+to be remembered. The argument turned out to apply just as well to `src/`:
+`galaxy.js`, `missions.js` and `dock.js` were all in `index.html` and none of
+them were in the offline shell, so an installed player would have had a game
+that ran online and died offline — the one failure that script exists to
+prevent. Both directories are walked now, and the stamper refuses to run if
+`index.html` loads a script the shell does not carry.
+
+| | |
+|---|---|
+| Belt depletion | home dug 207 → 104, Sill untouched, home restored on return |
+| Backgrounding | autosave fires on `visibilitychange` |
+| Worker blocked | packed on the main thread and read back correctly |
+| Offline shell | 30 files, and every `<script src>` in `index.html` verified present |
+
+## Equipment, and the first thing credits have ever been for
+
+Money accumulated and did nothing. You could earn it by mining, by selling,
+and — since the contract board — by working, and then it sat in the corner of
+the HUD being a number. A game where the reward for doing the thing is a bigger
+number that buys nothing has no second act.
+
+Twelve modules across four slot categories, all of them from the build plan's
+own tables, with the plan's own stated drawbacks.
+
+### Three rules, each one a trap avoided
+
+**A module is a trade-off, never a straight upgrade.** If a part is better in
+every respect there is no decision, only an errand: earn the money, fit the
+part, never think about it again.
+
+This one is enforced by a test rather than by good intentions. It walks the
+table, previews fitting each module, and fails any that produces no worse
+number. **Two did on the first pass** — the Fire-Control Computer and the
+Navigation Computer. Both are justified in the plan by an *opportunity* cost:
+"no defensive benefit", "no direct combat benefit". That reasoning holds only
+while every slot is already full. With a spare slot they were free, and a free
+module is not a decision. Both carry mass now, which is what added hardware
+does.
+
+**Ships store only the ids.** Final statistics are recomputed from the hull and
+the fitted list every time. Nothing writes a derived number into the save, so
+rebalancing a module later changes every ship already carrying it instead of
+only the ones fitted after the patch — and an old save cannot smuggle in a stat
+the table no longer agrees with.
+
+**Flat first, then multipliers**: `(base + flat) × mult`. Stated once, applied
+everywhere, because the alternative is two modules that each say "+20%" and a
+player who cannot predict what fitting both will do. Verified by hand:
+thrusters and cargo pods on a corvette give `(300 + 90) × 0.90 = 351`, and the
+game agrees to four decimal places.
+
+### What it touches
+
+Effective stats are cached against a revision counter that fitting bumps. This
+runs inside the flight model and the AI, sixty times a second per ship, and
+recomputing a dozen multiplications for every hull every frame would be a real
+cost for an answer that changes when somebody presses a button. NPCs carry no
+fit at all and take a fast path straight to the class table — refitting their
+ships is a later phase, and pretending otherwise would charge thirty hulls a
+frame for the answer "nothing is fitted".
+
+Weapons go through the fit too: a Rangefinder Array turns the corvette's pulse
+from 620 m at 6.5 rounds a second into 837 m at 5.2.
+
+Two things needed more care than they looked:
+
+- **Ammo takes mass at body construction and will not be told otherwise**, so a
+  refit that changes mass rebuilds the rigid body. Free, because refitting only
+  happens docked, at rest, with nothing shooting.
+- **Fitting armour raises the hull ceiling; fitting a hold lowers the cargo
+  ceiling.** Both have to be re-clamped on every change, or a refit leaves a
+  ship reporting 180/160 hull, or carrying more than it can hold.
+
+Buying and fitting are one action, because they are one decision. A module
+bought and left in a locker is a second inventory screen to build and a second
+place to lose track of what you own. There is no locker; removing a module
+sells it back at half.
+
+### Measured
+
+| | |
+|---|---|
+| Every module has at least one worse number | 12 of 12 |
+| `(base + flat) × mult` | 351 predicted, 351 measured |
+| Buying at a station | 900 cr moved, module fitted, rigid body rebuilt, mass 14 → 17 |
+| Weapon through the fit | pulse 620 m / 6.5 rps → 837 m / 5.2 rps |
+| Fit across a reload | ids and the ceilings they imply both restored |
+
+## The pixelated look was never the art
+
+The complaint was image quality. The cause was that the game had been drawing
+a small picture and letting the phone stretch it.
+
+Phaser's `RESIZE` scale mode sizes the canvas **backing store in CSS pixels**.
+On a phone reporting `devicePixelRatio` 3, a 412-wide layout got a 412-wide
+framebuffer resampled across 1236 physical pixels. Every edge in the game was
+tripled by the compositor. The scene was always being drawn correctly; it was
+being drawn small.
+
+The fix is the one already shipped in Rivenmark, which is the same engine:
+make the game as many pixels as the device has, then scale the canvas
+**element** back down with `zoom` so it occupies the same space on screen.
+
+```js
+const r = dpr();
+scale: {
+  mode: Phaser.Scale.NONE,
+  width:  Math.round(innerWidth  * r),
+  height: Math.round(innerHeight * r),
+  zoom: 1 / r
+},
+pixelArt: false, antialias: true, roundPixels: false
+```
+
+`pixelArt` is the literal setting for "make it pixelated" — it forces NEAREST
+filtering on every texture. `roundPixels` snaps draws to integers, which at a
+fractional zoom is what makes a HUD shimmer as it moves.
+
+### Where the ratio is capped, and why it differs from Rivenmark
+
+Rivenmark caps at 3 and is right to: it is 2D sprite work where fill rate is
+nearly free, so there is no reason not to take every pixel the screen has.
+This is a 3D scene with a five-level bloom pyramid over the whole frame, and
+cost goes as the **square** of the ratio — 3 is nine times the fill of 1, 2 is
+four. Rendering at 3 took the test rasteriser to 0.8 fps.
+
+Two is where the argument lands, because the eye stops being the limit first.
+1 → 2 is the difference between a stretched image and a sharp one. 2 → 3 is a
+difference almost nobody can see on a phone at arm's length, bought at more
+than twice the price.
+
+### Adding bloom had silently turned antialiasing off
+
+The second half of the complaint, and a genuinely invisible bug.
+
+Asking Phaser for `antialias: true` gets MSAA on the **default framebuffer**.
+The moment an `EffectComposer` exists, the scene is no longer drawn there — it
+goes to the composer's own render target, which is created with no samples. So
+every edge was hard-aliased no matter what the context had been asked for, and
+had been since bloom was added. The composer now gets a multisampled target at
+4 samples, which is the usual sweet spot: it kills the staircase on the long
+straight edges this art direction is made of, and 8 costs more bandwidth than
+it buys on a phone.
+
+Anisotropy went from a hard 4 to whatever the device reports, which is 16 on
+essentially everything. Hull plates are seen at a glancing angle most of the
+time — the flank of a freighter sliding past the camera is the worst case
+there is — and that is exactly where a low anisotropy limit turns a panel
+texture into smear.
+
+### Keeping the HUD the size of a thumb
+
+The game's coordinate space is device pixels now, so a 96-pixel radar dial
+would have become 32 CSS pixels on a 3x screen. Rather than rescale a hundred
+literals across three files, each Phaser layer — radar, controls, gunsight —
+goes in a container scaled by the ratio and carries on drawing in the units it
+was written in. Line widths and radii scale with it; pointer coordinates
+convert once, at the door.
+
+Verified by comparison rather than by eye: the fire button is at CSS
+`316,797 r54` before and after, and tapping a radar mark still selects the
+contact it is drawn on.
+
+### Measured
+
+Same scene, same device profile — 412×915 at `devicePixelRatio` 3:
+
+| | before | after |
+|---|---|---|
+| Canvas backing store | 412×915 | **824×1830** |
+| Real pixels per CSS pixel | 1 | **2** |
+| MSAA samples | 0 | **4** |
+| Anisotropy | 4 | **16** |
+| HUD geometry | `316,797 r54` | `316,797 r54` |
+| fps, software rasteriser | 7.9 | 1.3 |
+
+That last row is four times the pixels on a CPU rasteriser that is fill-rate
+bound by construction, and it is the number least likely to predict a real
+device — but it is four times the fill either way, and on-device cost is still
+unverified. The adaptive quality ladder currently moves rock count and bloom;
+it does not move resolution. If the phone struggles, that is the next lever
+and it is the right one.
+
 ## Five bugs worth writing down
 
 Found by testing rather than by reading, and every one was silent:
@@ -795,17 +1095,19 @@ thing installs and plays with no network.
 Straight from the brief, so it is clear what is missing rather than merely
 absent:
 
-- **No missions to travel FOR.** The jump drive and the map are built, so the
-  galaxy is reachable — but six of the seven sectors are somewhere to go rather
-  than something to do. That is the next gap, and it is a content gap, not a
-  systems one.
+- **No second hull.** Modules exist, so credits have a use — but there is no
+  shipyard, no subclass, and no way to own anything the game did not hand you
+  at the start.
 - **No sieges or blockades**, in the mechanical sense. The defence emplacements
   are built and one Scrapper blockade is standing across the approach to Tarpon
   Reach, but nothing yet starves a station of Energy Cells to drop its shield
   regeneration to zero, which is what would let a blockade actually decide
   anything.
 - **No hangar docking.** The three-phase lerp-in sequence is not written.
-- **No mission board.** No weighted generation, no bounties, no escorts.
+- **No reputation.** Contracts pay credits and nothing else: helping Vanguard
+  clear a blockade does not make Vanguard like you, and there is no standing to
+  unlock anything with. That is the next thing, and it is what turns a board
+  into politics.
 - **No interdiction roll against NPCs.** The player's own drive can be
   disrupted by being shot while it spools, which is interdiction where it
   matters; pirates still do not roll against out-of-sector haulers crossing
@@ -815,10 +1117,10 @@ absent:
   now have the mechanism — a separately baked head, yaw-then-elevate, rate
   limited — so this is a matter of giving the dreadnought four of them rather
   than of inventing anything.
-- **Adaptive quality has three steps and nothing finer.** Below ~17 fps it
-  drops the belt to 1200 rocks and kills bloom; that is the whole ladder. It
-  does not touch shadow resolution, texture size or the render scale, so a
-  device that still cannot hold frame rate at LOW has nothing further to give.
+- **Adaptive quality does not touch resolution.** Below ~17 fps it drops the
+  belt to 1200 rocks and kills bloom; that is the whole ladder. Now that the
+  game renders at twice the linear resolution, render scale is the largest
+  lever left and the ladder cannot pull it.
 - **Balance is arithmetic, not playtesting** — and until the swept-collision
   fix above, it was arithmetic about damage that was never being delivered. Every
   time-to-kill figure previously reasoned from the weapon table described shots

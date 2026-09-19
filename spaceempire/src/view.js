@@ -1426,11 +1426,21 @@
     if (!_aim) { _aim = new THREE.Vector3(); _iq = new THREE.Quaternion(); }
     SE.Detail.init(THREE);
     sharedRenderer = third.renderer;
-    const cls = SE.CLASSES[ship.cls];
+    /* Told here rather than inside the material, because the material builds
+       its map and its envMap in one object literal and the map is evaluated
+       first — so asking the renderer for its anisotropy limit in the envMap
+       call would answer a question the texture had already stopped listening
+       for. */
+    SE.Detail.noteRenderer(third.renderer);
+    const clsBase = SE.CLASSES[ship.cls];
+    // Effective mass: armour and cargo pods are heavy, and the body has to be
+    // built with the mass the flight model is going to fly. This is also why a
+    // refit re-attaches the view — Ammo takes mass at construction.
+    const cls = SE.stats(ship);
 
     const obj = new E.ExtendedObject3D();
     obj.name = ship.id;
-    const hull = bakeHull(cls.id, ship.faction);
+    const hull = bakeHull(clsBase.id, ship.faction);
     obj.add(new THREE.Mesh(hull.geometry, hull.materials));
 
     /* The tracking head, on the platforms that have one. It is a child of the

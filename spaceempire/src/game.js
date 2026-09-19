@@ -23,8 +23,28 @@
   const AUTOSAVE = 25;        // seconds between autosaves
   const CAM_BACK = 34, CAM_UP = 11;
   const BLOOM_SCALE = 0.5;    // bloom is blur; half resolution is free-looking
+
+  /* The display ratio, capped at 2 — and the cap is the one number here worth
+     arguing about.
+     Rivenmark caps at 3 and is right to: it is 2D sprite work where the fill
+     rate is nearly free, so there is no reason not to take every pixel the
+     screen has. This is a 3D scene with a five-level bloom pyramid over the
+     whole frame, where cost goes as the SQUARE of the ratio. Three is nine
+     times the fill rate of one; two is four. Measured here, rendering at 3
+     took the software rasteriser to 0.8 fps.
+     Two is where the argument lands because the eye stops being the limit
+     first: 1 to 2 is the difference between a stretched image and a sharp
+     one, and 2 to 3 is a difference almost nobody can see on a phone held at
+     arm's length, bought at more than twice the price. */
+  function dpr() { return Math.max(1, Math.min(2, window.devicePixelRatio || 1)); }
+  SE.dpr = dpr;
   const GATE_R = 120;         // how close to a lane mouth counts as "in the gate"
   const JUMP_SPOOL = 4.0;     // seconds the drive takes to charge, uninterrupted
+  /* Docking range. Generous on purpose: a docking ring you have to hit exactly
+     is a precision task at the end of a journey, which is the least
+     interesting place to put one. The station is 92 metres across; 150 clear
+     of its hull means "you have arrived" and nothing more is asked of you. */
+  const DOCK_R = 150;
 
   /* Move `cur` toward `want` at a fixed rate, taking `up` seconds to cross the
      full -1..1 range when the magnitude is growing and `down` when it is
@@ -143,10 +163,32 @@
       this.course = null;        // { to } — the far end, not the next leg
       this.charge = 0;           // seconds the drive has been spooling
 
+      this.missions = SE.Missions(this.world);
+      // The world raises kills; the board decides whether any of them were
+      // worth money. Routed through here rather than called from combat so
+      // that out-of-sector attrition counts the same as a kill you watched.
+      this.world.onOOSKill = (v, k) => this.missions.onKill(v, k);
+      this.world.onEscortSpawn = ship => { if (ship.sector === this.world.sectorId) this.attach(ship); };
+
+      this.dock = SE.Dock({
+        player: () => this.world.player,
+        priceAt: (id, g) => this.world.priceAt(id, g),
+        sell: (st, g) => this.world.iface(this.world.sectorId).trade(this.world.player, st, g),
+        credits: () => this.world.credits,
+        buy: id => this.buyModule(id),
+        unfit: id => this.unfitModule(id),
+        board: st => this.missions.board(st),
+        accept: m => this.missions.accept(m),
+        deliver: st => this.missions.onDock(st, this.world.player),
+        contracts: () => this.missions.active,
+        say: m => this.say(m)
+      });
+
       this.enterSector('home');
 
       this.persist = SE.Persistence();
       this.wireDom();
+      this.wireSaveOnExit();
       this.restore();
     }
 
@@ -174,7 +216,24 @@
     buildPostChain() {
       const third = this.third;
       const size = third.renderer.getSize(new THREE.Vector2());
-      const composer = new E.EffectComposer(third.renderer);
+
+      /* The composer gets a MULTISAMPLED target, and this is the second half
+         of the "pixelated" complaint.
+         Asking Phaser for `antialias: true` gets MSAA on the DEFAULT
+         framebuffer — and the moment an EffectComposer exists, the scene is
+         no longer drawn to the default framebuffer. It goes to the composer's
+         own render target, which has no samples, so every edge in the game
+         was hard-aliased no matter what the context was asked for. Adding
+         bloom silently turned antialiasing off.
+         Four samples is the usual sweet spot: it removes the staircase on the
+         long straight edges this art direction is made of, and 8 costs more
+         bandwidth than it buys on a phone. */
+      const samples = third.renderer.capabilities.isWebGL2 ? 4 : 0;
+      const target = new THREE.WebGLRenderTarget(size.x, size.y, {
+        type: THREE.HalfFloatType,
+        samples: samples
+      });
+      const composer = new E.EffectComposer(third.renderer, target);
       composer.addPass(new E.RenderPass(third.scene, third.camera));
       // Bloom runs at half resolution. It is a five-level gaussian pyramid over
       // the whole frame, which is the most expensive thing in the renderer by
@@ -234,21 +293,31 @@
        without it, hitting anything crossing is luck.
     */
     buildSight() {
-      this.sight = this.add.graphics().setDepth(8);
+      // Scaled by the display ratio like the rest of the 2D layer, so a
+      // 9-pixel pipper stays a 9-pixel pipper and is drawn with 27 real ones.
+      const S = dpr();
+      this.sightRoot = this.add.container(0, 0).setScale(S).setDepth(8);
+      this.sight = this.add.graphics();
       this.sightTxt = this.add.text(0, 0, '', {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: '10px', color: '#ff9d9d'
-      }).setDepth(9).setVisible(false);
+      }).setVisible(false);
+      this.sightRoot.add(this.sight);
+      this.sightRoot.add(this.sightTxt);
     }
 
-    // World point to screen pixels. Returns null when the point is behind the
-    // camera, where projection maths gives a confident and completely wrong
-    // answer on the opposite side of the screen.
+    /* World point to CSS pixels. Returns null when the point is behind the
+       camera, where projection maths gives a confident and completely wrong
+       answer on the opposite side of the screen.
+       CSS and not device pixels, because everything that consumes this draws
+       inside the ratio-scaled container — handing it device pixels would put
+       the pipper at three times the distance from the corner. */
     toScreen(v3) {
       const cam = this.third.camera;
       this._proj.copy(v3).project(cam);
       if (this._proj.z > 1) return null;
-      const W = this.scale.width, H = this.scale.height;
+      const S = dpr();
+      const W = this.scale.width / S, H = this.scale.height / S;
       return { x: (this._proj.x + 1) / 2 * W, y: (-this._proj.y + 1) / 2 * H };
     }
 
@@ -443,13 +512,14 @@
       if (dom && dom.jump) {
         dom.jump.classList.add('on');
         const name = SE.SECTOR_BY_ID[leg.leg].name.toUpperCase();
+        const need = JUMP_SPOOL * (SE.stats(me).spool || 1);
         dom.jumptext.textContent = inside
-          ? 'JUMP ' + name + ' — ' + Math.max(0, JUMP_SPOOL - this.charge).toFixed(1) + 's'
+          ? 'JUMP ' + name + ' — ' + Math.max(0, need - this.charge).toFixed(1) + 's'
           : name + ' GATE — ' + Math.round(d) + 'm';
-        dom.jumpbar.style.width = Math.min(100, this.charge / JUMP_SPOOL * 100) + '%';
+        dom.jumpbar.style.width = Math.min(100, this.charge / need * 100) + '%';
       }
 
-      if (this.charge >= JUMP_SPOOL) this.doJump(leg.leg);
+      if (this.charge >= JUMP_SPOOL * (SE.stats(me).spool || 1)) this.doJump(leg.leg);
     }
 
     /* The transfer. The player and every owned hull in the sector go together:
@@ -492,17 +562,92 @@
       this.autosave();
     }
 
+    /* Buying and fitting are one action, because they are one decision. A
+       module bought and left in a locker is a second inventory screen to
+       build and a second place for the player to lose track of what they own;
+       there is no locker, so removing a module sells it back at half. */
+    buyModule(id) {
+      const me = this.world.player;
+      const m = SE.MODULES[id];
+      if (!m) return 'unknown module';
+      if (this.world.credits < m.cost) return 'NOT ENOUGH CREDITS';
+      const err = SE.fitModule(me, id);
+      if (err) return err;
+      this.world.credits -= m.cost;
+      this.refitView(me);
+      this.say('FITTED ' + m.name.toUpperCase() + ' — ' + m.cost + ' CR');
+      this.autosave(true);
+      return null;
+    }
+
+    unfitModule(id) {
+      const me = this.world.player;
+      const m = SE.MODULES[id];
+      const err = SE.unfitModule(me, id);
+      if (err) return err;
+      const back = Math.round(m.cost * 0.5);
+      this.world.credits += back;
+      this.refitView(me);
+      this.say('REMOVED ' + m.name.toUpperCase() + ' — ' + back + ' CR BACK');
+      this.autosave(true);
+      return null;
+    }
+
+    /* Ammo takes mass at body construction and will not be told otherwise, so
+       a refit that changes mass has to rebuild the body. Detach and reattach,
+       carrying the transform across — which is free here because refitting
+       only happens docked, at rest, with nothing shooting. */
+    refitView(ship) {
+      const v = this.views[ship.id];
+      if (!v) return;
+      v.pull();
+      const vx = ship.vx, vy = ship.vy, vz = ship.vz;
+      this.detach(ship);
+      this.attach(ship);
+      const nv = this.views[ship.id];
+      if (nv && nv.body) nv.body.setVelocity(vx, vy, vz);
+    }
+
+    /* Am I close enough to a station to talk to it? The button appears and
+       disappears on its own rather than being always present and sometimes
+       refusing — a control that is there but says no teaches nothing about
+       where you have to be. */
+    stepDock(me) {
+      const btn = this.dom && this.dom.dockbtn;
+      if (!btn) return;
+      const st = me && !me.dead
+        ? this.world.iface(this.world.sectorId).stationFor(me) : null;
+      const near = st && Math.hypot(me.x - st.x, me.y - st.y, me.z - st.z) <
+        DOCK_R + SE.CLASSES[st.cls].size;
+      btn.classList.toggle('on', !!near);
+      this._nearStation = near ? st : null;
+      // Drifting out of range closes the panel rather than leaving a menu open
+      // over a station you can no longer reach.
+      if (!near && this.dock.open) { this.dock.hide(); this.say('DOCKING RANGE LOST'); }
+    }
+
     /* ---- Sector entry and exit -----------------------------------------
        The moment the split is visible. Everything in the new sector grows a
        body; everything in the old one loses one and carries on as numbers. */
     enterSector(id) {
       const third = this.third;
+      const w = this.world;
+      w.beltState = w.beltState || {};
       for (const k in this.views) { this.views[k].destroy(); delete this.views[k]; }
-      if (this.world.belt) { this.world.belt.destroy(); this.world.belt = null; }
+      // Take the mined seams with us. The belt object is about to stop
+      // existing, and it is the only record of what has been dug out of it.
+      if (w.belt) {
+        w.beltState[w.sectorId] = SE.harvestBelt(w.belt);
+        w.belt.destroy();
+        w.belt = null;
+      }
 
       this.world.sectorId = id;
       const sec = SE.SECTOR_BY_ID[id];
-      if (sec.belt) this.world.belt = SE.Belt(third, E, this.world.seed + ':' + id);
+      if (sec.belt) {
+        this.world.belt = SE.Belt(third, E, this.world.seed + ':' + id);
+        SE.applyBelt(this.world.belt, w.beltState[id]);
+      }
 
       const list = this.world.registry.inSector(id);
       for (let i = 0; i < list.length; i++) this.attach(list[i]);
@@ -567,7 +712,7 @@
         if (s.dead) continue;
         s.cool = Math.max(0, s.cool - dt);
         const cls = SE.CLASSES[s.cls];
-        if (s.shield < s.shieldMax) s.shield = Math.min(s.shieldMax, s.shield + cls.shieldRegen * dt);
+        if (s.shield < s.shieldMax) s.shield = Math.min(s.shieldMax, s.shield + SE.stats(s).shieldRegen * dt);
 
         const v = this.views[s.id];
         if (s.isPlayer) { this.flyPlayer(s, v, dt); continue; }
@@ -619,6 +764,8 @@
       }
       this.stepMining(me, dt);
       this.stepJump(dt);
+      this.stepDock(me);
+      this.missions.tick();
       this.reapDead(list);
 
       // 5. the rest of the galaxy, on its own coarser clock
@@ -674,7 +821,8 @@
       if (!v || !v.body) return;
       const st = this.controls.state;
       const body = v.body;
-      const cls = SE.CLASSES[s.cls];
+      // Effective, not nominal: what the hull does with what is bolted to it.
+      const cls = SE.stats(s);
 
       const q = this._q.set(s.qx, s.qy, s.qz, s.qw);
       const right = this._right.set(1, 0, 0).applyQuaternion(q);
@@ -816,6 +964,11 @@
         const held = Math.round(SE.cargoUsed(s));
         this.combat.scatter(s.x, s.y, s.z, crates, held > 20 ? 'ore' : 'scrap',
           held > 20 ? Math.round(held / crates) : Math.round(cls.hull / 22));
+        // Who did it. The killer is not tracked on the round, so the honest
+        // answer is "the player's side" — every hostile that dies in the
+        // sector the player is flying in is one the player or their wingmen
+        // shot, because nothing else in a sector shoots a hostile of ours.
+        if (!s.owned) this.missions.onKill(s, this.world.player);
         if (s.isPlayer) { this.playerDown(s); continue; }
         // A structure is never reaped. Belt and braces with the rule in
         // damage(): losing the only station in a sector would take that
@@ -918,8 +1071,11 @@
     viewTap(sx, sy) {
       const w = this.world;
       const cam = this.third.camera;
-      const nx = (sx / this.scale.width) * 2 - 1;
-      const ny = -(sy / this.scale.height) * 2 + 1;
+      // sx/sy arrive in CSS pixels; the ratio cancels, but both halves of the
+      // fraction have to be in the same space for it to.
+      const S = dpr();
+      const nx = (sx / (this.scale.width / S)) * 2 - 1;
+      const ny = -(sy / (this.scale.height / S)) * 2 + 1;
 
       // Cast at both, then decide. Ships win ties and win narrowly-behind,
       // because they are smaller and they move and a tap meant for a raider
@@ -985,7 +1141,7 @@
         credits: $('credits'), cargo: $('cargo'), speed: $('speed'),
         sector: $('sector'), msg: $('msg'), fleet: $('fleet'), mode: $('mode'),
         jump: $('jump'), jumptext: $('jumptext'), jumpbar: $('jumpbar').firstElementChild,
-        mapbtn: $('mapbtn')
+        mapbtn: $('mapbtn'), dockbtn: $('dockbtn'), tracker: $('tracker')
       };
       const setMode = m => {
         this.radar.mode = m;
@@ -1025,6 +1181,9 @@
       // pull up mid-fight and the reason the map redraws on demand rather than
       // holding a frozen copy.
       $('mapbtn').addEventListener('click', () => this.galaxy.toggle());
+      $('dockbtn').addEventListener('click', () => {
+        if (this._nearStation) this.dock.show(this._nearStation);
+      });
       $('gxclose').addEventListener('click', () => this.galaxy.hide());
       $('gxset').addEventListener('click', () => {
         const to = this.galaxy.picked;
@@ -1051,6 +1210,21 @@
       d.cargo.textContent = Math.round(SE.cargoUsed(me)) + '/' + me.cargoMax;
       d.speed.textContent = Math.round(this.speed || 0);
       d.sector.textContent = SE.SECTOR_BY_ID[w.sectorId].name;
+      if (d.tracker) {
+        const cs = this.missions.active;
+        d.tracker.classList.toggle('on', cs.length > 0);
+        if (cs.length) {
+          d.tracker.innerHTML = '';
+          for (const c of cs) {
+            const line = document.createElement('div');
+            const prog = c.type === 'HAUL'
+              ? Math.floor(me ? (me.cargo[c.good] || 0) : 0) + '/' + c.need
+              : c.type === 'ESCORT' ? 'EN ROUTE' : c.done + '/' + c.need;
+            line.innerHTML = c.title.toUpperCase() + ' <b>' + prog + '</b>';
+            d.tracker.appendChild(line);
+          }
+        }
+      }
       if (d.mapbtn) {
         const on = !!this.course;
         d.mapbtn.classList.toggle('lit', on);
@@ -1082,11 +1256,33 @@
     }
 
     /* ---- Saving ---------------------------------------------------------- */
-    autosave() {
+    /* Returns the promise. It used to swallow it, which meant `await
+       autosave()` resolved before anything had been written — harmless in the
+       game, and it made a test reload the page mid-write and report that
+       contracts were not being saved when they were. */
+    autosave(quiet) {
       const snap = SE.snapshot(this.world);
-      this.persist.save(snap).then(bytes => {
-        if (bytes) this.say('SAVED — ' + Math.round(bytes / 1024) + ' KB');
-      }).catch(err => this.say('SAVE FAILED: ' + err.message));
+      return this.persist.save(snap).then(bytes => {
+        if (bytes && !quiet) this.say('SAVED — ' + Math.round(bytes / 1024) + ' KB');
+        return bytes;
+      }).catch(err => { this.say('SAVE FAILED: ' + err.message); });
+    }
+
+    /* Leaving the app is the normal way to stop playing on a phone, and it
+       does not announce itself — there is no quit button to hang a save off.
+       visibilitychange fires when the app is backgrounded, which is the last
+       reliable moment there is; pagehide covers the tab actually going away.
+       Without these, up to a full autosave interval of play is simply lost,
+       and the player's evidence for that is a mined seam that came back. */
+    wireSaveOnExit() {
+      const flush = () => {
+        if (this._gone) return;
+        try { this.autosave(true); } catch (e) { /* going away regardless */ }
+      };
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flush();
+      });
+      window.addEventListener('pagehide', flush);
     }
 
     async restore() {
@@ -1109,34 +1305,96 @@
           vx: r.vx, vy: r.vy, vz: r.vz, hull: r.hull, shield: r.shield,
           cargo: r.cargo || {}, credits: r.credits || 0, orders: r.orders || [], dead: !!r.dead
         });
+        /* Equipment, if the file carries any. Assigned separately rather than
+           in the object above, because `fit: undefined` would overwrite the
+           empty fit makeShip just handed an owned hull — and a ship with no
+           fit object cannot be refitted at all. bumpFit then rebuilds the
+           ceilings the modules imply, so armour restores as 380/380 rather
+           than as 380 hull inside a 220 maximum. */
+        if (r.fit) { s.fit = r.fit; SE.bumpFit(s); }
         w.registry.add(s);
       });
       w.credits = data.credits;
+      w.contracts = data.contracts || [];
+      w.completed = data.completed || [];
+      w.boards = {};
       w.elapsed = data.elapsed || 0;
       w.stationStock = data.stations || {};
+      /* Belt deltas for EVERY sector, not just the one being entered. The
+         table is installed before enterSector so that the sector it builds
+         picks up its own depletion on the way in, and every other sector's
+         waits in the table until the player arrives there.
+         `data.belt` is the old single-sector shape; a save written before this
+         existed is honoured by filing it under the sector it was taken in,
+         which is the only sector it could possibly have described. */
+      w.beltState = data.belts || {};
+      if (data.belt && !data.belts) w.beltState[data.sector || 'home'] = data.belt;
       this.enterSector(data.sector || 'home');
-      // Belt deltas last: the belt only exists once the sector is built.
-      if (w.belt && data.belt) {
-        for (let i = 0; i < data.belt.length; i += 2) {
-          const idx = data.belt[i], remaining = data.belt[i + 1];
-          w.belt.take(idx, Math.max(0, w.belt.ore[idx] - remaining));
-        }
-      }
       this.say('COMMANDER FILE RESTORED');
       window.SE_RESTORED = true;
     }
   }
 
   SE.SectorScene = SectorScene;
+
+  /* ---- Rendering at the resolution the screen actually has ---------------
+   *
+   * This was the whole of the "pixelated" complaint and it had nothing to do
+   * with the art.
+   *
+   * Phaser's RESIZE mode sizes the canvas BACKING STORE in CSS pixels. On a
+   * phone reporting devicePixelRatio 3, a 412-wide layout got a 412-wide
+   * framebuffer stretched across 1236 physical pixels — every edge in the
+   * game resampled up by three, which is exactly what "pixelated" looks like.
+   * The scene was always being drawn correctly; it was being drawn small and
+   * then blown up.
+   *
+   * The fix is the one already shipped in Rivenmark, which is the same engine:
+   * make the game as many pixels as the device has, then scale the CANVAS
+   * ELEMENT back down with zoom so it still occupies the same space on screen.
+   * The backing store is native; the layout is unchanged.
+   *
+   * The ratio is capped at 2, which is lower than Rivenmark's 3 for a reason
+   * given at the cap itself: this is a 3D scene with a full-frame bloom
+   * pyramid, and fill cost goes as the square of the ratio.
+   */
+
   SE.boot = function () {
     E.PhysicsLoader('vendor/ammo', () => {
-      window.SE_GAME = new Phaser.Game({
+      const r = dpr();
+      const game = new Phaser.Game({
         type: Phaser.WEBGL,
         transparent: true,
-        scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
+        /* pixelArt would set NEAREST filtering on every texture, which is the
+           literal setting for "make it pixelated". antialias asks the context
+           for MSAA. roundPixels snaps draws to integers, which at a fractional
+           zoom is what makes a HUD shimmer as it moves. */
+        pixelArt: false,
+        antialias: true,
+        roundPixels: false,
+        scale: {
+          // NONE, not RESIZE: the size is being computed here, and RESIZE
+          // would overwrite it with CSS pixels on the first resize event.
+          mode: Phaser.Scale.NONE,
+          autoCenter: Phaser.Scale.NO_CENTER,
+          width: Math.round(window.innerWidth * r),
+          height: Math.round(window.innerHeight * r),
+          zoom: 1 / r
+        },
         scene: [SectorScene],
         ...E.Canvas()
       });
+      window.SE_GAME = game;
+
+      // Rotating a phone changes both the size and, on some devices, the
+      // ratio. Recompute both rather than assuming one of them held.
+      const fit = () => {
+        const k = dpr();
+        game.scale.zoom = 1 / k;
+        game.scale.resize(Math.round(window.innerWidth * k), Math.round(window.innerHeight * k));
+      };
+      window.addEventListener('resize', fit);
+      window.addEventListener('orientationchange', () => setTimeout(fit, 120));
     });
   };
 })(window.SE = window.SE || {});

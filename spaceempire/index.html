@@ -2,84 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Tarpon Reach · Independent Command</title>
-<meta name="description" content="Command a fleet, build an empire and shape a galaxy of sixty systems. A space strategy sandbox with living trade, faction politics and orbital industry.">
-<meta name="theme-color" content="#080e16">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="manifest" href="app.webmanifest">
-<link rel="icon" href="icon-192.png" type="image/png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles/flight.css">
-<link rel="stylesheet" href="styles/deck.css">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tarpon Reach has moved</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #080e16; color: #dfeaf2;
+         font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 24px; box-sizing: border-box; }
+  main { max-width: 460px; }
+  h1 { font-weight: 500; font-size: 28px; margin: 0 0 12px; color: #efbc7f; }
+  a.button { display: inline-block; margin-top: 18px; padding: 14px 20px; border-radius: 8px; background: #efbc7f;
+             color: #10161d; font-weight: 600; text-decoration: none; }
+  p.small { color: #8fa9b8; font-size: 13px; margin-top: 22px; }
+</style>
 </head>
 <body>
-<div id="hud" aria-label="Flight instruments">
-  <header class="flight-header">
-    <button class="brand-mark icon-button" data-action="menu" aria-label="Open command deck"><span data-icon="fleet"></span></button>
-    <div class="sector-label"><span class="eyebrow" id="sector-authority">INDEPENDENT SPACE</span><b id="sector">Tarpon Reach</b></div>
-    <div class="account"><span class="eyebrow">AVAILABLE CAPITAL</span><strong><span id="credits">2,400</span> <small>CR</small></strong></div>
-    <button class="icon-button" data-action="chart" aria-label="Open star chart"><span data-icon="chart"></span></button>
-    <button class="icon-button" data-action="menu" aria-label="Pause and open command"><span data-icon="pause"></span></button>
-  </header>
-  <section id="vitals" class="flight-card"><div class="instrument-kicker"><span>FLAGSHIP TELEMETRY</span><span id="ship-condition">NOMINAL</span></div><div class="ship-caption"><b id="ship-name">Kestrel</b><span id="ship-class">CORVETTE COMMAND</span></div><div class="meter-label"><span>HULL</span><b id="hull-value">220/220</b></div><div class="meter"><i id="hull"></i></div><div class="meter-label"><span>SHIELD</span><b id="shield-value">180/180</b></div><div class="meter shield-meter"><i id="shield"></i></div><div class="hold-label"><span>HOLD <b id="cargo">0/24</b></span><span id="flight-rank">Independent</span></div></section>
-  <button id="objective" class="flight-card" data-action="objective"><span class="eyebrow">CHARTER OBJECTIVE <span>↗</span></span><strong id="objective-title">Make your first command</strong><small id="objective-progress">0/1 · +180 cr</small><div class="objective-track"><i id="objective-fill"></i></div></button>
-  <div id="target-info" class="hidden"><span class="eyebrow"><span data-icon="target"></span> SELECTED CONTACT</span><b id="target-name"></b><small id="target-range"></small><div class="contact-track"><i id="target-fill"></i></div></div>
-  <div id="hit-marker" aria-hidden="true">×</div>
-  <div id="jump"><div id="jumptext"></div><div id="jumpbar"><i></i></div></div>
-  <div class="camera-tools" role="group" aria-label="Camera controls"><span id="camera-hint">DRAG SPACE TO LOOK</span><div><button id="camera-control" aria-label="Toggle free-look camera" aria-pressed="false"><span data-icon="orbit"></span>LOOK</button><button id="camera-home" aria-label="Recenter camera"><span data-icon="center"></span>CENTER</button><button id="camera-out" aria-label="Zoom camera out">−</button><button id="camera-in" aria-label="Zoom camera in">+</button></div></div>
-  <div class="flight-actions"><button class="utility-button" data-action="navigate" data-value="mine"><span data-icon="ore"></span>ORE</button><button id="context-button" class="context-button" data-action="context">DOCK AT PORT</button><button class="utility-button" data-action="target"><span data-icon="target"></span>TARGET</button></div>
-  <div class="nav-readout"><i></i><span id="nav-status">MANUAL FLIGHT</span></div><div class="flight-footer"><div class="speed-label"><span>VELOCITY</span><strong><b id="speed">0</b><small>M/S</small></strong></div><div class="bridge-shortcuts"><button data-action="panel" data-value="fleet"><span data-icon="fleet"></span>FLEET</button><button data-action="chart"><span data-icon="chart"></span>CHART</button><button data-action="menu"><span data-icon="bars"></span>COMMAND</button></div></div>
-  <button id="brake-control" class="control-small" data-action="brake">BRAKE</button>
-  <button id="boost-control" class="control-small" aria-label="Hold to boost"><span data-icon="bolt"></span>BOOST<div class="boost-meter"><i id="boost-fill"></i></div></button>
-  <span class="steer-hint">STEER</span><span class="fire-hint">FIRE</span>
-  <div id="msg" class="hidden"></div><button id="dockbtn" class="hidden" aria-hidden="true" tabindex="-1">Dock</button>
-</div>
-<div class="damage-vignette" aria-hidden="true"></div>
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
-<section id="title-screen" class="title-screen hidden" aria-label="Main menu">
-  <div class="title-noise" aria-hidden="true"></div>
-  <header class="title-top"><div class="wordmark"><span data-icon="fleet"></span>TARPON / REACH</div><span class="edition">INDEPENDENT COMMAND <i>01</i></span></header>
-  <div class="title-layout">
-    <div class="title-copy"><div class="eyebrow"><i class="signal-dot"></i> THE SEVERANCE CHANGED EVERYTHING</div><h1>TARPON<br><span>REACH</span><em>01 — THE FRONTIER IS OPEN</em></h1><p>One ship. A growing fleet.<br>An empire worth building.</p><button id="launch-button" class="launch-button" data-action="launch"><span id="launch-label">Enter the Reach</span><span data-icon="arrow"></span></button><button class="text-button" data-action="panel" data-value="settings">SETTINGS <span>↗</span></button></div>
-    <div class="title-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="planet"></div><div class="orbital-station"><i></i><i></i><i></i><b></b></div><div class="art-coordinate coordinate-one">TARPON REACH<br><b>APEX TERRITORY</b></div><div class="art-coordinate coordinate-two">INDEPENDENT CHARTER<br><b>TRANSPONDER VERIFIED</b></div><div class="vector-line"></div></div>
-    <aside class="title-manifest"><span class="eyebrow" id="title-session">A NEW INDEPENDENT CHARTER</span><h2>Your command<br>starts here.</h2><div><span>LOCATION</span><b id="title-sector">Tarpon Reach</b></div><div><span>STATUS</span><b id="title-rank">Independent</b></div><div><span>ASSETS</span><b id="title-fleet">3 operational hulls</b></div><p>Fly. Trade. Build. Decide who gets to shape the next civilisation.</p></aside>
-  </div>
-  <footer class="title-footer"><span><i class="signal-dot"></i> COMMAND LINK ESTABLISHED</span><span>FLEET COMMAND · INDEPENDENT CHARTER</span><span>PLAYABLE ALPHA · 01</span></footer>
-</section>
-<section id="command-screen" class="command-screen hidden" role="dialog" aria-modal="true" aria-label="Command deck">
-  <header class="command-header"><button class="brand-mark icon-button" data-action="title" aria-label="Main menu"><span data-icon="fleet"></span></button><div><div class="eyebrow" id="command-kicker">INDEPENDENT COMMAND</div><h1 id="command-title">Command deck</h1></div><div class="command-account"><span>AVAILABLE CAPITAL</span><b><span id="command-credits">2,400</span> <small>CR</small></b></div><button id="command-close" class="button" data-action="resume">Back to map <span data-icon="close"></span></button></header>
-  <nav id="panel-tabs" class="panel-tabs" role="tablist" aria-label="Command sections"></nav>
-  <main id="panel-body" class="panel-body" role="tabpanel" tabindex="0"></main>
-  <footer class="command-footer"><span><i class="signal-dot"></i> SIMULATION PAUSED</span><span>INDEPENDENT COMMAND · TARPON REACH</span></footer>
-</section>
-<section id="galaxy" aria-label="Star chart"><header id="gxhead"><div class="gx-where"><span class="eyebrow" id="gx-authority">APX JURISDICTION</span><h2 id="gxwhere">Tarpon Reach</h2></div><div class="gx-account"><span class="eyebrow">CAPITAL</span><b><span id="gx-credits">2,400</span> <small>CR</small></b></div><button id="gx-pace" class="icon-button gx-pace" data-action="pace" aria-label="Game speed">1×</button><button class="icon-button" data-action="menu" aria-label="Open command deck"><span data-icon="bars"></span></button></header><button id="gx-objective" data-action="objective"><span class="eyebrow">CHARTER OBJECTIVE</span><strong id="gx-objective-title">Make your first command</strong><small id="gx-objective-progress">0/1</small></button><div id="gxwrap"><canvas id="galaxymap" aria-label="Tap a system to inspect it and send your fleet"></canvas></div><footer id="gxfoot"><div id="gx-fleet">Your fleet is holding.</div><div id="gxdetail">Tap a system to inspect it.</div><div class="gx-actions"><button id="gxport" class="button" data-action="context">Dock</button><button id="gxstop" class="button" data-action="stop">Hold position</button><button id="gxset" class="button primary" data-action="chart-course" disabled>SEND FLEET</button></div><nav class="gx-tabs"><button data-action="panel" data-value="fleet"><span data-icon="fleet"></span>Fleet</button><button data-action="panel" data-value="industry"><span data-icon="industry"></span>Industry</button><button data-action="panel" data-value="contracts"><span data-icon="contract"></span>Contracts</button><button data-action="panel" data-value="factions"><span data-icon="shield"></span>Factions</button></nav></footer></section>
-<div id="dock" class="hidden"><div id="dkwho"></div><div id="dkbody"></div><button id="dkclose">Leave</button></div>
-<div id="boot"><div class="boot-mark">TR<span>INDEPENDENT COMMAND</span></div><div class="boot-track"><i></i></div><p id="bootmsg">ESTABLISHING COMMAND LINK</p><p id="boot-error" class="hidden"></p><button id="boot-retry" class="button hidden" onclick="location.reload()">Retry connection</button></div>
-<script src="vendor/phaser.min.js"></script>
-<script src="vendor/localforage.min.js"></script>
-<script src="vendor/d3-delaunay.min.js"></script>
-<script src="vendor/crypto-js.min.js"></script>
-<script src="src/rng.js"></script>
-<script src="src/cosmos.js"></script>
-<script src="src/universe.js"></script>
-<script src="src/gear.js"></script>
-<script src="src/state.js"></script>
-<script src="src/ai.js"></script>
-<script src="src/pools.js"></script>
-<script src="src/galaxy.js"></script>
-<script src="src/missions.js"></script>
-<script src="src/world.js"></script>
-<script src="src/reach/core.js"></script>
-<script src="src/reach/motion.js"></script>
-<script src="src/reach/transit.js"></script>
-<script src="src/reach/economy.js"></script>
-<script src="src/reach/validate.js"></script>
-<script src="src/reach/director.js"></script>
-<script src="src/reach/instruments.js"></script>
-<script src="src/reach/shell.js"></script>
-<script src="src/reach/persistence.js"></script>
-<script src="src/empire.js"></script>
-<script src="src/boot.js"></script>
-</body></html>
+<main>
+  <h1>Tarpon Reach is now an Android app</h1>
+  <p>The browser version is no longer updated. The game lives in its own
+  repository and every new build is published as an APK.</p>
+  <a class="button" href="https://github.com/abdulalrubat-bit/tarpon-reach/releases/tag/latest-debug">Get the latest APK</a>
+  <p class="small">A save from the browser version can be carried over: open the old
+  build's command deck, Settings, Export backup, then Import backup in the app.
+  Source: <a href="https://github.com/abdulalrubat-bit/tarpon-reach">github.com/abdulalrubat-bit/tarpon-reach</a></p>
+</main>
+</body>
+</html>

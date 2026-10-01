@@ -26,6 +26,7 @@
       credits: 2400,
       belt: null,              // set by the scene when the active sector builds one
       stationStock: {},
+      events: new SE.EventBus(),
       log: [],
 
       get player() { return registry.all.find(s => s.isPlayer); },
@@ -38,6 +39,8 @@
       }
     };
 
+    w.transit = new SE.TransitNetwork(w);
+
     /* ---- The interface the AI sees --------------------------------------
        `live` is true for the sector with geometry in it. Everything below
        branches on it exactly once, in the two places where the answer really
@@ -47,6 +50,28 @@
 
       return {
         get: id => registry.get(id),
+        navigate: (ship, intent, dt, order) => w.transit.steer(ship, intent, dt, order),
+        dockPoint: (station, ship) => w.transit.dockPoint(station, ship),
+        miningPoint: (ship, node) => w.transit.miningPoint(ship, node) || {x:node.x,y:node.y+112,z:node.z},
+        freightLeg(ship) {
+          const candidates = SE.ADJ[ship.sector].filter(id => { const station = registry.get("st_" + id); return station && !SE.hostile(ship.faction, station.faction); });
+          return candidates.length ? candidates[Math.floor(w.elapsed / 30) % candidates.length] : null;
+        },
+
+        formationSlot(ship, leader) {
+          // Reserve a free slot across queued guards as well as active guards.
+          // Escorts returning from other sectors must not all claim slot zero.
+          const occupied = new Set();
+          for (const other of registry.all) {
+            if (other.id === ship.id || other.dead) continue;
+            for (const order of other.orders) {
+              if (order.type === 'GUARD' && order.target === leader.id && Number.isInteger(order.slot)) occupied.add(order.slot);
+            }
+          }
+          let slot = 0;
+          while (occupied.has(slot)) ++slot;
+          return slot;
+        },
 
         nearestHostile(s, range) {
           return registry.nearest(s, sectorId,
@@ -68,9 +93,9 @@
           if (live()) {
             if (idx >= 0) {
               const n = w.belt.node(idx);
-              if (n) return n;
+              if (n && w.transit.miningPoint(s, n)) return n;
             }
-            const near = w.belt.nearestOre(s.x, s.y, s.z, 2200);
+            const near = w.belt.nearestOre(s.x, s.y, s.z, 4000, node => !!w.transit.miningPoint(s, node));
             if (near && s.orders[0]) s.orders[0].node = near.index;
             return near;
           }
@@ -87,7 +112,8 @@
         // learns to sit in a sector to make their miners work faster.
         mine(s, node, dt) {
           const rate = (SE.CLASSES[s.cls].miner ? 26 : 7) * (SE.stats(s).mineRate || 1);
-          const want = rate * dt;
+          const want = Math.max(0, Math.min(rate * dt, s.cargoMax - SE.cargoUsed(s)));
+          if (want <= 0) return 0;
           let got;
           if (live() && node.index >= 0) got = w.belt.take(node.index, want);
           else {
@@ -99,15 +125,22 @@
         },
 
         trade(s, st, good) {
+          if (w.economy) {
+            if ((s.cargo[good] || 0) < 1) return 0;
+            const result = w.economy.trade(s, st, good, 'sell', s.cargo[good] || 0);
+            s.tradeStatus = result.message;
+            return result.ok ? result.amount / 100 : 0;
+          }
           const qty = Math.floor(s.cargo[good] || 0);
           if (qty <= 0) return 0;
           const price = priceAt(st.id, good);
-          s.cargo[good] = 0;
+          s.cargo[good] = Math.max(0, (s.cargo[good] || 0) - qty);
           const paid = Math.round(qty * price);
           const stock = w.stationStock[st.id] || (w.stationStock[st.id] = {});
           stock[good] = (stock[good] || 0) + qty;
           if (s.owned) {
             w.credits += paid;
+            w.events.emit({ type: 'trade', ship: s, station: st, good, quantity: qty, credits: paid });
             w.say(s.name.toUpperCase() + ' SOLD ' + qty + ' ' + good.toUpperCase() + ' — ' + paid + ' CR');
           }
           return paid;
@@ -145,70 +178,25 @@
 
         // Somewhere to be when there is nothing to do. Patrols orbit; haulers
         // drift toward the lanes; everyone stays inside the sector.
-        patrolPoint(s) {
-          const a = rng.float(0, Math.PI * 2);
-          const r = rng.float(200, SE.SECTOR_R * 0.8);
-          return { x: Math.cos(a) * r, y: rng.float(-120, 120), z: Math.sin(a) * r };
-        },
+        patrolPoint(s) { return w.transit.patrol(s); },
 
-        /* What is in the way, as a steering nudge.
-           Looks a couple of seconds down the ship's own track and pushes the
-           seek point sideways around anything substantial it finds. Ships had
-           no obstacle sense at all before this: an order to cross the belt was
-           carried out by flying at the waypoint until a rock stopped them, and
-           then continuing to fly at the waypoint, for ever.
-           Bounded by the grid and by a hard cap on how many rocks it will look
-           at, so a sector full of miners cannot make this expensive. */
-        avoid(s, fwd, out) {
-          out.x = 0; out.y = 0; out.z = 0;
-          if (!live()) return false;
-          const cls = SE.CLASSES[s.cls];
-          const look = Math.max(90, cls.size * 4 + Math.hypot(s.vx, s.vy, s.vz) * 1.8);
-          const b = w.belt;
-          const probeX = s.x + fwd.x * look * 0.5;
-          const probeY = s.y + fwd.y * look * 0.5;
-          const probeZ = s.z + fwd.z * look * 0.5;
-          b.near(probeX, probeY, probeZ, look * 0.7, _avoidList, 12);
-          if (!_avoidList.length) return false;
-          let any = false;
-          for (let k = 0; k < _avoidList.length; k++) {
-            const i = _avoidList[k];
-            const dx = b.px[i] - s.x, dy = b.py[i] - s.y, dz = b.pz[i] - s.z;
-            const d = Math.hypot(dx, dy, dz) || 1;
-            // only things roughly ahead are a problem
-            const ahead = (dx * fwd.x + dy * fwd.y + dz * fwd.z) / d;
-            if (ahead < 0.35) continue;
-            const clear = b.sc[i] * 1.25 + cls.size * 1.1;
-            if (d > look) continue;
-            // push away from the rock, weighted by how close and how central
-            const wgt = (1 - d / look) * ahead * clear;
-            out.x -= dx / d * wgt; out.y -= dy / d * wgt; out.z -= dz / d * wgt;
-            any = true;
-          }
-          if (!any) return false;
-          const l = Math.hypot(out.x, out.y, out.z) || 1;
-          const push = Math.min(l, look * 0.9);
-          out.x = out.x / l * push; out.y = out.y / l * push; out.z = out.z / l * push;
-          return true;
-        },
-
-        laneExit(from, to) {
-          const A = SE.SECTOR_BY_ID[from], B = SE.SECTOR_BY_ID[to];
-          if (!A || !B) return null;
-          // The lane leaves in the direction of the destination on the galaxy
-          // map, at the edge of the sector. Consistent, and it means a player
-          // who learns the map knows which way to fly before being told.
-          const dx = B.gx - A.gx, dy = B.gy - A.gy;
-          const l = Math.hypot(dx, dy) || 1;
-          return { x: dx / l * SE.SECTOR_R * 0.92, y: 0, z: dy / l * SE.SECTOR_R * 0.92 };
-        },
+        laneExit(from, to) { return w.transit.gate(from, to); },
 
         jump(s, to) {
+          const from = s.sector;
+          const arrival = w.transit.gate(to, from);
           registry.move(s, to);
           // Arrive at the far side's matching lane mouth rather than at the
           // origin: a fleet that jumps in should appear at the edge it came
           // from, which is also the edge a player watching would expect.
-          s.x *= -0.9; s.z *= -0.9; s.y = 0;
+          if (arrival) {
+            const n = Math.hypot(arrival.x, arrival.z) || 1;
+            s.x = arrival.x - arrival.x / n * 110;
+            s.z = arrival.z - arrival.z / n * 110;
+            s.y = 0;
+            SE.AI.quatFromForward(s, -arrival.x / n, 0, -arrival.z / n);
+          }
+          w.transit.reset(s);
           s.vx = s.vy = s.vz = 0;
           s.orderData = null;
           if (w.onJump) w.onJump(s, to);
@@ -216,7 +204,6 @@
       };
     }
 
-    const _avoidList = [];
 
     function laneLen(a, b) {
       const A = SE.SECTOR_BY_ID[a], B = SE.SECTOR_BY_ID[b];
@@ -226,6 +213,7 @@
     // Price moves against stock: a station drowning in ore pays less for ore.
     // Simple, legible, and enough to make "where do I sell this" a question.
     function priceAt(stationId, good) {
+      if (w.economy && registry.get(stationId)) return w.economy.price(registry.get(stationId), good, 'sell');
       const base = SE.GOODS[good].base;
       const stock = (w.stationStock[stationId] || {})[good] || 0;
       const glut = Math.min(0.55, stock / 4000);
@@ -241,31 +229,44 @@
        stations accumulating stock, all as arithmetic, all of it costing about
        as much as one physics body would.
     */
+    const oosShips = [];
+    let economyClock = 0;
     w.tickOOS = function (dt) {
-      for (let i = 0; i < SE.SECTORS.length; i++) {
-        const sid = SE.SECTORS[i].id;
-        if (sid === w.sectorId) continue;
-        const api = iface(sid);
-        const list = registry.inSector(sid);
-        for (let k = 0; k < list.length; k++) {
-          const s = list[k];
-          if (s.dead) continue;
-          s.cool = Math.max(0, s.cool - dt);
-          if (s.shield < s.shieldMax) s.shield = Math.min(s.shieldMax, s.shield + SE.CLASSES[s.cls].shieldRegen * dt);
-          const it = SE.AI.think(s, api, dt);
-          SE.AI.applyAbstract(s, it, dt);
-          // Combat out of sector is resolved as attrition rather than as
-          // simulated rounds. Two fleets that meet off-screen still decide
-          // something; they just do not each need two hundred projectiles.
-          if (it.fire && it.target) {
-            const foe = registry.get(it.target);
-            if (foe && !foe.dead && s.cool <= 0) {
-              const wep = SE.WEAPONS[SE.CLASSES[s.cls].weapon];
-              s.cool = 1 / wep.rate;
-              SE.damage(foe, wep.damage * SE.CLASSES[s.cls].hardpoints * 0.55);
-              if (foe.dead && w.onOOSKill) w.onOOSKill(foe, s);
-            }
+      oosShips.length = 0;
+      for (const ship of registry.all) if (ship.sector !== w.sectorId && !ship.isPlayer) oosShips.push(ship);
+      for (const s of oosShips) {
+        if (s.dead) { registry.remove(s); continue; }
+        const sid = s.sector, api = iface(sid);
+        s.cool = Math.max(0, s.cool - dt);
+        if (w.elapsed - (s.damageAt ?? -100) > 3) s.shield = Math.min(s.shieldMax, s.shield + SE.stats(s).shieldRegen * dt);
+        const it = SE.AI.think(s, api, dt);
+        if (s.sector !== sid) continue;
+        SE.AI.applyAbstract(s, it, dt);
+        if (it.fire && it.target) {
+          const foe = registry.get(it.target);
+          if (foe && !foe.dead && foe.sector === sid && s.cool <= 0) {
+            const weapon = SE.weaponOf(s);
+            s.cool = 1 / weapon.rate;
+            foe.lastHitBy = s.id; foe.damageAt = w.elapsed;
+            SE.damage(foe, weapon.damage * SE.stats(s).hardpoints * 0.55);
+            if (foe.dead && w.onOOSKill) w.onOOSKill(foe, s);
           }
+        }
+      }
+      // Remove off-screen losses now; a later sector arrival must not award them a second time.
+      for (let i = registry.all.length - 1; i >= 0; i--) {
+        const ship = registry.all[i];
+        if (ship.dead && ship.sector !== w.sectorId && !ship.isPlayer) registry.remove(ship);
+      }
+      if (w.economy) return; // The typed economy is the sole production owner.
+      economyClock += dt;
+      if (economyClock >= 20) {
+        economyClock -= 20;
+        for (const station of registry.all) {
+          if (SE.CLASSES[station.cls].tier !== 'structure') continue;
+          const stock = w.stationStock[station.id] || (w.stationStock[station.id] = {});
+          if ((stock.ore || 0) >= 18 && (stock.alloy || 0) < 450) { stock.ore -= 18; stock.alloy = (stock.alloy || 0) + 6; }
+          stock.cells = Math.min(360, (stock.cells || 0) + 4);
         }
       }
     };
@@ -281,74 +282,11 @@
     const rng = SE.Rng(world.seed + ':pop');
     const reg = world.registry;
 
-    SE.SECTORS.forEach(sec => {
-      if (sec.station) {
-        const st = SE.makeShip({
-          id: 'st_' + sec.id, name: sec.station, cls: 'station',
-          faction: sec.owner || 'apex', sector: sec.id,
-          x: 0, y: 0, z: 0
-        });
-        reg.add(st);
-
-        /* A perimeter of defence emplacements, in the owner's two platform
-           types, on a ring around the station.
-           Not flush against the hull: the point of a perimeter is that you
-           meet it BEFORE you reach what it is guarding, and a turret welded to
-           the station's side is just more station. 200 metres out is far
-           enough that you have to decide whether to cross it, and close enough
-           that the platforms and the station support each other rather than
-           being defeated one at a time.
-           Every platform is yawed to face outwards. Their heads track, so the
-           resting bearing only matters for the second before something
-           arrives — but that second is what a player sees on approach, and a
-           perimeter all facing the same way looks like scenery someone forgot
-           to rotate. */
-        const kinds = SE.DEFENCES[sec.owner || 'apex'] || SE.DEFENCES.apex;
-        const count = sec.id === 'home' ? 4 : rng.int(2, 4);
-        for (let i = 0; i < count; i++) {
-          const a = (i / count) * Math.PI * 2 + rng.float(-0.2, 0.2);
-          const r = 200 + rng.float(-16, 16);
-          const cls = kinds[i % kinds.length];
-          reg.add(SE.makeShip({
-            id: 'def_' + sec.id + '_' + i,
-            name: SE.CLASSES[cls].name + ' ' + (i + 1),
-            cls, faction: sec.owner || 'apex', sector: sec.id,
-            x: Math.cos(a) * r, y: rng.float(-30, 30), z: Math.sin(a) * r,
-            // Identity faces -Z, so yawing by (a + PI/2) turns the platform's
-            // nose along the outward radius.
-            yaw: a + Math.PI / 2
-          }));
-        }
-      }
-
-      const traffic = sec.id === 'home' ? 4 : rng.int(2, 5);
-      for (let i = 0; i < traffic; i++) {
-        const a = rng.float(0, Math.PI * 2);
-        const r = rng.float(260, SE.SECTOR_R * 0.75);
-        const owner = sec.owner || rng.pick(['scrapper', 'apex']);
-        const isPirate = owner === 'scrapper' ? rng.chance(0.62) : rng.chance(0.18);
-        const cls = isPirate
-          ? rng.pick(['interceptor', 'interceptor', 'corvette'])
-          : (sec.belt ? rng.pick(['extractor', 'freighter', 'corvette']) : rng.pick(['freighter', 'corvette']));
-        const fac = isPirate ? 'scrapper' : owner;
-        reg.add(SE.makeShip({
-          cls, faction: fac, sector: sec.id,
-          name: shipName(rng, fac, cls),
-          x: Math.cos(a) * r, y: rng.float(-140, 140), z: Math.sin(a) * r
-        }));
-      }
-
-      // One capital per faction homeworld, so the heavy class exists in the
-      // world rather than only in the roster.
-      if (sec.owner && rng.chance(sec.id === 'home' ? 1 : 0.35)) {
-        const a = rng.float(0, Math.PI * 2);
-        reg.add(SE.makeShip({
-          cls: 'dreadnought', faction: sec.owner, sector: sec.id,
-          name: capitalName(rng, sec.owner),
-          x: Math.cos(a) * 520, y: rng.float(-40, 40), z: Math.sin(a) * 520
-        }));
-      }
-    });
+    /* The authored seven draw from one shared sequence, as they always have.
+       Every generated system gets its own stream keyed by its id, so filling
+       one in later (see populateMissing) produces exactly what a fresh game
+       would have put there. */
+    SE.SECTORS.forEach(sec => populateSector(world, sec, sec.generated ? SE.Rng(world.seed + ':pop:' + sec.id) : rng));
 
     /* A Scrapper blockade in the home sector, out on the belt.
 
@@ -385,25 +323,111 @@
     // the camera, and the first thing on screen is somewhere to go.
     const me = SE.makeShip({
       id: 'player', name: 'Kestrel', cls: 'corvette', faction: 'player',
-      sector: 'home', x: 0, y: 16, z: 190, isPlayer: true, owned: true
+      sector: 'home', x: 0, y: 70, z: 580, isPlayer: true, owned: true
     });
     reg.add(me);
 
     const wing = SE.makeShip({
       id: 'wing1', name: 'Shrike', cls: 'interceptor', faction: 'player',
-      sector: 'home', x: 46, y: 6, z: 214, owned: true,
+      sector: 'home', x: 65, y: 55, z: 615, owned: true,
       orders: [{ type: 'GUARD', target: 'player', slot: 0 }]
     });
     reg.add(wing);
 
     const miner = SE.makeShip({
       id: 'mine1', name: 'Ladle', cls: 'extractor', faction: 'player',
-      sector: 'home', x: -52, y: -8, z: 220, owned: true,
+      sector: 'home', x: -65, y: 50, z: 615, owned: true,
       orders: [{ type: 'GUARD', target: 'player', slot: 1 }]
     });
     reg.add(miner);
 
     return world;
+  }
+
+  function populateSector(world, sec, rng) {
+    const reg = world.registry;
+    if (sec.station) {
+      const st = SE.makeShip({
+        id: 'st_' + sec.id, name: sec.station, cls: 'station',
+        faction: sec.owner || 'apex', sector: sec.id,
+        x: 0, y: 0, z: 0
+      });
+      reg.add(st);
+      world.stationStock[st.id] = { ore: sec.belt ? 420 : 130, alloy: sec.id === "home" ? 8 : sec.owner === "apex" ? 140 : 70, cells: 90, scrap: sec.owner === "scrapper" ? 240 : 60 };
+
+      /* A perimeter of defence emplacements, in the owner's two platform
+         types, on a ring around the station.
+         Not flush against the hull: the point of a perimeter is that you
+         meet it BEFORE you reach what it is guarding, and a turret welded to
+         the station's side is just more station. 200 metres out is far
+         enough that you have to decide whether to cross it, and close enough
+         that the platforms and the station support each other rather than
+         being defeated one at a time.
+         Every platform is yawed to face outwards. Their heads track, so the
+         resting bearing only matters for the second before something
+         arrives — but that second is what a player sees on approach, and a
+         perimeter all facing the same way looks like scenery someone forgot
+         to rotate. */
+      const kinds = SE.DEFENCES[sec.owner || 'apex'] || SE.DEFENCES.apex;
+      const count = sec.id === 'home' ? 4 : rng.int(2, 4);
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + rng.float(-0.2, 0.2);
+        const r = 370 + rng.float(-12, 12);
+        const cls = kinds[i % kinds.length];
+        reg.add(SE.makeShip({
+          id: 'def_' + sec.id + '_' + i,
+          name: SE.CLASSES[cls].name + ' ' + (i + 1),
+          cls, faction: sec.owner || 'apex', sector: sec.id,
+          x: Math.cos(a) * r, y: rng.float(-30, 30), z: Math.sin(a) * r,
+          // Identity faces -Z, so yawing by (a + PI/2) turns the platform's
+          // nose along the outward radius.
+          yaw: a + Math.PI / 2
+        }));
+      }
+    }
+
+    const traffic = sec.id === 'home' ? 4 : rng.int(2, 5);
+    for (let i = 0; i < traffic; i++) {
+      const a = rng.float(0, Math.PI * 2);
+      const r = rng.float(260, SE.SECTOR_R * 0.75);
+      const owner = sec.owner || rng.pick(['scrapper', 'apex']);
+      const isPirate = owner === 'scrapper' ? rng.chance(0.62) : rng.chance(0.18);
+      const cls = isPirate
+        ? rng.pick(['interceptor', 'interceptor', 'corvette'])
+        : (sec.belt ? rng.pick(['extractor', 'freighter', 'corvette']) : rng.pick(['freighter', 'corvette']));
+      const fac = isPirate ? 'scrapper' : owner;
+      reg.add(SE.makeShip({
+        cls, faction: fac, sector: sec.id,
+        name: shipName(rng, fac, cls),
+        x: Math.cos(a) * r, y: rng.float(-140, 140), z: Math.sin(a) * r
+      }));
+    }
+
+    // One capital per faction homeworld, so the heavy class exists in the
+    // world rather than only in the roster.
+    if (sec.owner && rng.chance(sec.id === 'home' ? 1 : 0.35)) {
+      const a = rng.float(0, Math.PI * 2);
+      reg.add(SE.makeShip({
+        cls: 'dreadnought', faction: sec.owner, sector: sec.id,
+        name: capitalName(rng, sec.owner),
+        x: Math.cos(a) * 520, y: rng.float(-40, 40), z: Math.sin(a) * 520
+      }));
+    }
+  }
+
+  /* A save written before the galaxy grew knows only the authored seven, so
+     every generated system would load empty: no station, no traffic, nothing
+     to claim or fight. Fill in whichever generated systems the file had no
+     ships in at all, using the same per-system stream a new game would. */
+  function populateMissing(world) {
+    const occupied = new Set(world.registry.all.map(s => s.sector));
+    let filled = 0;
+    for (const sec of SE.SECTORS) {
+      if (!sec.generated || occupied.has(sec.id)) continue;
+      populateSector(world, sec, SE.Rng(world.seed + ':pop:' + sec.id));
+      ++filled;
+    }
+    return filled;
   }
 
   const PREFIX = {
@@ -425,4 +449,5 @@
 
   SE.World = World;
   SE.populate = populate;
+  SE.populateMissing = populateMissing;
 })(window.SE = window.SE || {});

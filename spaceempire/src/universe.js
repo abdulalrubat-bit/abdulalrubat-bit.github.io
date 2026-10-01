@@ -123,7 +123,7 @@
       // station's shield down and it should climb back afterwards, which reads
       // as a fortress holding rather than as a fortress being whittled away.
       hull: 6000, shield: 9000, shieldRegen: 90,
-      cargoMax: 20000, size: 46,
+      cargoMax: 20000, size: 300,
       // Three turrets, not six. A station that one-volleys an interceptor is
       // not a deterrent, it is an exclusion zone, and there is nothing to do
       // near one.
@@ -294,6 +294,10 @@
     ['harrow', 'pilot'], ['sill', 'lowmark']
   ];
 
+  // The hand-built seven are the heart of it; cosmos.js grows the rest of the
+  // galaxy around them, lanes and territory included.
+  if (SE.expandGalaxy) SE.expandGalaxy(SECTORS, LANES);
+
   // Adjacency, built once. A* over this is how a fleet ordered to a sector it
   // cannot see works out the legs in between.
   const ADJ = {};
@@ -313,6 +317,7 @@
      between its ends, which is what keeps the result actually optimal rather
      than merely quick. */
   function route(from, to) {
+    if (!SECTOR_BY_ID[from] || !SECTOR_BY_ID[to]) return null;
     if (from === to) return [from];
     const open = [from];
     const g = { [from]: 0 };
@@ -360,7 +365,7 @@
 
   // In-sector metres. The belt sits between these radii and the station near
   // the middle; the radar's outer ring is SECTOR_R.
-  SE.SECTOR_R = 1400;
-  SE.BELT_INNER = 420;
-  SE.BELT_OUTER = 1050;
+  SE.SECTOR_R = 2000;
+  SE.BELT_INNER = 650;
+  SE.BELT_OUTER = 1250;
 })(window.SE = window.SE || {});

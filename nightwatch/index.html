@@ -101,7 +101,7 @@
 <div class="bottom-telemetry" aria-hidden="true"><span>RAVEN 1—1 <i>●</i> ON STATION</span><span id="target-readout">FIRE CONTROL / READY</span><span>NIGHTWATCH / V.04</span></div>
 <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
  <div class="briefing"><div class="briefing-top"><span>RAVEN 1—1</span><span class="clearance">MISSION BRIEF</span></div><div class="briefing-symbol">⌖</div><div class="eyebrow" id="modal-kicker">YOU ARE THE EYE IN THE SKY</div><h2 id="modal-title">OWN THE<br><em>NIGHT.</em></h2><p id="modal-description">Three friendly trucks. A hostile valley. Keep the convoy alive until it reaches extraction.</p>
- <div class="briefing-steps" id="briefing-steps"><div><b>01</b><p><strong>Find your target</strong><span>Aim with your right thumb. Two fingers pan or pinch to zoom. DRAG AIM switches to panning.</span></p></div><div><b>02</b><p><strong>Choose your impact</strong><span>Tap the compact weapon tabs: 25mm for speed, 40mm for armour, 105mm for groups.</span></p></div><div><b>03</b><p><strong>Bring them home</strong><span>Hold FIRE on the left with your left thumb. Protect the cyan convoy through three waves.</span></p></div></div>
+ <div class="briefing-steps" id="briefing-steps"><div><b>01</b><p><strong>Find your target</strong><span>Aim with your right thumb. Two fingers pan or pinch to zoom. DRAG AIM switches to panning.</span></p></div><div><b>02</b><p><strong>Choose your impact</strong><span>Tap the weapon tabs: 25mm shreds light vehicles but bounces off armour. 40mm punches armour. 105mm flattens groups.</span></p></div><div><b>03</b><p><strong>Bring them home</strong><span>Hold FIRE on the left with your left thumb. Protect the cyan convoy through three waves.</span></p></div></div>
  <div id="results" class="results" hidden></div><button id="start" class="primary">TAKE THE GUNNER'S SEAT</button><button id="restart" class="secondary" hidden>RESTART MISSION</button><p class="briefing-note" id="briefing-note">Touch ready · Landscape recommended · Headphones on</p></div>
 </div>
 </main>
@@ -125,6 +125,8 @@ const WEAPONS = Object.freeze([
  {id:2,name:'105MM HOWITZER',interval:2.5,damage:205,radius:119,flight:1.08,heat:.22,ammo:10,shake:8}
 ]);
 const TYPES=Object.freeze({scout:1,raider:2,armour:3,friendly:4});
+/** Damage multiplier by [weapon][target type - 1]: scout, raider, armour. Gives each gun a job. */
+const ARMOUR=Object.freeze([[1,.8,.5],[.9,1.15,1.4],[1.2,1.2,1.25]]);
 /** @type {readonly {count:number,interval:number,mix:number[],name:string}[]} */
 const WAVES = Object.freeze([
  {count:8,interval:2.7,mix:[1,1,2,1,2,1,2,3],name:'FIRST CONTACT'},
@@ -221,7 +223,7 @@ class Simulation {
    const distance=Math.hypot(s.x[i]-p.x,s.y[i]-p.y);if(distance>w.radius+13)continue;
    // Friendly safety is deliberate for the first test; geometry still registers the event.
    if(s.type[i]===4)continue;
-   const amount=w.damage*(.35+.65*(1-clamp(distance/(w.radius+13),0,1)));
+   const resist=ARMOUR[p.weapon][s.type[i]-1],amount=w.damage*resist*(.35+.65*(1-clamp(distance/(w.radius+13),0,1)));if(resist<=.5)this.signal('deflect',s.x[i],s.y[i],resist,p.weapon);
    s.hp[i]-=amount;s.flash[i]=.17;hit=true;this.signal('hit',s.x[i],s.y[i],amount,p.weapon);
    if(s.hp[i]<=0){s.active[i]=0;this.kills++;const points=s.type[i]===3?350:s.type[i]===2?180:100;this.score+=points;this.signal('destroy',s.x[i],s.y[i],points,s.type[i]);}
   }
@@ -530,7 +532,7 @@ class Effects {
  /** @param {number} dt @returns {void} */step(dt){for(const w of this.wrecks)if(sim.time-w.born<9){w.smokeDelay-=dt;if(w.smokeDelay<=0){w.smokeDelay=.5;this.add(w.x,w.y,1,12);}}for(const p of this.items)if(p.active){p.age+=dt;if(p.age>=p.life){p.active=false;continue;}if(p.kind===4)continue;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=1-dt*1.3;p.vy*=1-dt*1.3;}}
 }
 const effects=new Effects();
-const presentation={hitUntil:0,bannerUntil:0,target:-1};
+const presentation={hitUntil:0,bannerUntil:0,target:-1,deflectTold:false};
 const banner=el('mission-banner'),bannerKicker=el('banner-kicker'),bannerTitle=el('banner-title');
 /** @param {string} kicker @param {string} title @returns {void} */function announce(kicker,title){bannerKicker.textContent=kicker;bannerTitle.textContent=title;banner.hidden=false;presentation.bannerUntil=sim.time+3.2;}
 
@@ -574,6 +576,7 @@ let lastTime=0,accumulator=0,uiTime=0,visualTime=0,lastMessageAt=0;
  case 'wave':announce(`WAVE 0${event.value} / 03`,WAVES[event.value-1].name);comms(event.value===1?'Hostiles approaching. Drag to aim; hold FIRE to engage.':event.value===2?'Armoured vehicles inbound. Switch to 40mm or 105mm.':'Final assault. Break this attack and get them home.');break;
  case 'resupply':announce('SECTOR SECURED','RESUPPLY  /  +500');comms('Sector clear. Ammunition replenished. Stand by for the next wave.');break;
  case 'extract':announce('THREATS ELIMINATED','BRING THEM HOME');comms('All hostiles down. Convoy accelerating to extraction.');break;
+ case 'deflect':if(!presentation.deflectTold){presentation.deflectTold=true;comms('25mm is bouncing off that armour. Switch to 40mm or 105mm.');}break;
  case 'overheat':comms('Weapon overheated. Switch weapons while it cools.');break;
  case 'select':selectWeaponUI();break;
  case 'pause':clearInput();showModal('paused');break;
@@ -586,10 +589,10 @@ sim.events.subscribe(handleEvent);
 /** @param {'paused'|'won'|'lost'} state @returns {void} */function showModal(state){
  ui.modal.hidden=false;ui.steps.hidden=true;ui.restart.hidden=state!=='paused';ui.results.hidden=state==='paused';
  if(state==='paused'){ui.kicker.textContent='SENSOR FEED SUSPENDED';ui.title.innerHTML='HOLDING<br><em>ORBIT.</em>';ui.description.textContent='Mission paused. Your convoy is safe while you are away.';ui.start.textContent='RESUME MISSION';ui.note.textContent='Drag to aim · Hold FIRE · 1 / 2 / 3 switch weapons';}
- else {const won=state==='won';ui.kicker.textContent=won?'OPERATION COMPLETE':'SIGNAL LOST';ui.title.innerHTML=won?'CONVOY<br><em>SECURED.</em>':'MISSION<br><em>LOST.</em>';ui.description.textContent=won?'The convoy made it through. Raven 1—1, you are cleared to return.':'The convoy was overwhelmed. Prioritise vehicles closest to the trucks and use heavy shells on armour.';ui.results.innerHTML=`<div>MISSION SCORE<strong>${sim.score.toLocaleString()}</strong></div><div>HOSTILES DESTROYED<strong>${sim.kills} / 33</strong></div><div>TRUCKS SAVED<strong>${sim.entities.count(4)} / 3</strong></div><div>SHOT HIT RATE<strong>${sim.shots?Math.round(sim.hits/sim.shots*100):0}%</strong></div>`;ui.start.textContent='FLY AGAIN';ui.note.textContent=won?'Try another thermal mode or a different weapon mix.':'25mm has unlimited ammunition. Switch weapons during cooldowns.';}
+ else {const won=state==='won';ui.kicker.textContent=won?'OPERATION COMPLETE':'SIGNAL LOST';ui.title.innerHTML=won?'CONVOY<br><em>SECURED.</em>':'MISSION<br><em>LOST.</em>';ui.description.textContent=won?'The convoy made it through. Raven 1—1, you are cleared to return.':'The convoy was overwhelmed. Prioritise vehicles closest to the trucks and use heavy shells on armour.';ui.results.innerHTML=`<div>MISSION SCORE<strong>${sim.score.toLocaleString()}</strong></div><div>HOSTILES DESTROYED<strong>${sim.kills} / 33</strong></div><div>TRUCKS SAVED<strong>${sim.entities.count(4)} / 3</strong></div><div>SHOT HIT RATE<strong>${sim.shots?Math.round(sim.hits/sim.shots*100):0}%</strong></div>`;ui.start.textContent='FLY AGAIN';ui.note.textContent=won?'Try another thermal mode or a different weapon mix.':'25mm barely scratches armour. Save 40mm for tanks and 105mm for clusters.';}
  ui.start.focus();
 }
-/** @returns {void} */function startMission(){clearInput();effects.clear();presentation.hitUntil=0;presentation.target=-1;for(const b of buildings)b.destroyed=false;sim.reset();camera.reset();updateZoomUI();updateCameraUI();updateAim();selectWeaponUI();ui.modal.hidden=true;lastTime=performance.now();accumulator=0;updateHUD();canvas.focus();}
+/** @returns {void} */function startMission(){clearInput();effects.clear();presentation.hitUntil=0;presentation.target=-1;presentation.deflectTold=false;for(const b of buildings)b.destroyed=false;sim.reset();camera.reset();updateZoomUI();updateCameraUI();updateAim();selectWeaponUI();ui.modal.hidden=true;lastTime=performance.now();accumulator=0;updateHUD();canvas.focus();}
 /** @returns {void} */function updateZoomUI(){ui.zoom.innerHTML=`ZOOM <span>${camera.zoom.toFixed(1)}×</span>`;}
 /** @returns {void} */function cycleZoom(){if(sim.state!=='running')return;camera.requestZoom(camera.zoomTarget<1.4?1.6:camera.zoomTarget<2?2.3:1);}
 /** @returns {void} */function cycleThermal(){palette=(palette+1)%PALETTES.length;buildTerrain();ui.mode.textContent=PALETTES[palette].label;ui.thermal.innerHTML=`IR <span>${PALETTES[palette].short}</span>`;}

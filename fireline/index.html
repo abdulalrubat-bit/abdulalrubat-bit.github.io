@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#151d19">
-<meta name="description" content="Load. Lay. Fire. Observe. A hands-on mobile mortar simulator with a living, persistent battlefield.">
-<title>FIRELINE — Mortar Field Simulator</title>
+<meta name="description" content="Load. Lay. Fire. Observe. A hands-on mobile mortar and howitzer simulator with a living, persistent battlefield.">
+<title>FIRELINE — Field Artillery Simulator</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23151d19'/%3E%3Cpath d='M15 49h34M27 44l13-28 7 3-13 28M23 47l-5-17M36 47l11-9' fill='none' stroke='%23e7b777' stroke-width='4'/%3E%3C/svg%3E">
 <style>
 :root{color-scheme:dark;--ink:#ecede2;--muted:#aeb9ac;--dim:#748476;--amber:#e9b67b;--line:rgba(202,218,193,.2);--glass:rgba(17,27,22,.88);--green:#b7cba8;--safe-bottom:env(safe-area-inset-bottom,0px);--safe-top:env(safe-area-inset-top,0px);font-family:Arial,Helvetica,sans-serif}
@@ -37,6 +37,12 @@
 @media(max-width:619px){.hud .practice-coach,.hud .optic-controls{position:fixed;top:calc(120px + var(--safe-top));left:max(14px,env(safe-area-inset-left));right:max(14px,env(safe-area-inset-right));bottom:auto;width:auto;max-height:calc(100dvh - 300px)}[data-pressure=true] .hud .practice-coach,[data-pressure=true] .hud .optic-controls{top:calc(155px + var(--safe-top))}}
 @media(max-width:619px) and (max-height:700px){.hud .practice-coach,.hud .optic-controls{top:calc(110px + var(--safe-top));padding:8px 10px}.practice-actions button{min-height:38px}.moving-tools button{min-height:30px}.aid-tips{margin-top:7px;padding-top:6px}}
 @media(max-height:540px) and (min-width:620px){.hud .practice-coach{max-height:calc(100dvh - 205px)}.hud .practice-coach .error{margin-top:6px}}
+/* Weapon choice, range card and adjustable range wind. */
+.mission-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.mission-card.range-card{background:linear-gradient(120deg,rgba(52,58,40,.85),rgba(22,30,20,.87));border-style:dashed}button.wind-block{border:0;background:none;padding:0;color:var(--muted)}button.wind-block:disabled{opacity:1;cursor:default}button.wind-block:not(:disabled){pointer-events:auto;border-bottom:1px dashed var(--amber);padding-bottom:3px}button.wind-block:not(:disabled) span{color:var(--amber)}
+.weapon-pick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}.weapon-pick button{text-align:left;padding:12px 14px;border:1px solid var(--line);background:rgba(9,22,13,.28);border-radius:3px;min-height:64px}.weapon-pick button[aria-pressed=true]{border-color:var(--amber);background:rgba(233,182,123,.14)}.weapon-pick b{display:block;font:11px ui-monospace,monospace;letter-spacing:1.2px;color:var(--ink)}.weapon-pick button[aria-pressed=true] b{color:var(--amber)}.weapon-pick small{display:block;margin-top:6px;font:8px/1.5 ui-monospace,monospace;letter-spacing:.5px;color:var(--muted)}
+@media(max-width:900px){.mission-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-height:540px) and (min-width:620px){.mission-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.menu-side{display:none}.weapon-pick{margin-top:12px}.weapon-pick button{min-height:50px;padding:8px 11px}}
+@media(max-width:619px){.mission-grid{grid-template-columns:1fr}.weapon-pick small{font-size:7px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -55,14 +61,14 @@
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
 </svg>
 <main id="app" data-mode="menu" data-view="weapon" data-modal="false">
-<canvas id="world" tabindex="-1" aria-label="Interactive three-dimensional battlefield. Drag to adjust the mortar. Select LOOK in the observer view to pan the optics only."></canvas>
+<canvas id="world" tabindex="-1" aria-label="Interactive three-dimensional battlefield. Drag to adjust the weapon. Select LOOK in the observer view to pan the optics only."></canvas>
 <canvas id="markers" aria-hidden="true"></canvas><div class="film" aria-hidden="true"></div>
 <div class="scope-overlay" aria-hidden="true">
 <svg class="reticle" viewBox="0 0 1000 600" preserveAspectRatio="none"><path d="M200 300h245m110 0h245M500 150v123m0 54v140M460 290v20m-20-16v12m-20-16v20m120-20v20m20-16v12m20-16v20M490 340h20m-16 20h12m-16 20h20m-16 20h12M498 300h4"/><circle cx="500" cy="300" r="18" class="bright"/><path class="bright" d="M475 300h10m30 0h10M500 275v10m0 30v10"/></svg>
 <span class="scope-caption">OBSERVATION OPTIC<br>RETICLE DOES NOT PREDICT IMPACT</span>
 </div>
 <section class="hud" aria-label="Weapon controls and mission status">
- <header class="hud-top"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE</div><span class="station-type">LIGHT MORTAR / FIELD TRIAL</span><div class="wind-block"><span>WIND</span><strong id="wind">1.4 →</strong></div><div class="hud-tools"><button class="icon-button" id="soundButton" aria-label="Mute sound" aria-pressed="true"><svg><use href="#i-sound"/></svg></button><button class="icon-button desktop-extra" id="fullscreen" aria-label="Fullscreen"><svg><use href="#i-full"/></svg></button><button class="icon-button" id="helpButton" aria-label="How to play"><svg><use href="#i-help"/></svg></button><button class="icon-button desktop-extra" id="settingsButton" aria-label="Settings"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="pause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button></div></header>
+ <header class="hud-top"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE</div><span class="station-type">LIGHT MORTAR / FIELD TRIAL</span><button class="wind-block" id="windBlock" disabled aria-label="Wind"><span id="windLabel">WIND</span><strong id="wind">1.4 →</strong></button><div class="hud-tools"><button class="icon-button" id="soundButton" aria-label="Mute sound" aria-pressed="true"><svg><use href="#i-sound"/></svg></button><button class="icon-button desktop-extra" id="fullscreen" aria-label="Fullscreen"><svg><use href="#i-full"/></svg></button><button class="icon-button" id="helpButton" aria-label="How to play"><svg><use href="#i-help"/></svg></button><button class="icon-button desktop-extra" id="settingsButton" aria-label="Settings"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="pause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button></div></header>
  <div class="objective-row"><div class="objective-card"><div class="eyebrow" id="missionLabel">01 / THE ORCHARD</div><p id="objective">Destroy the fortified position</p></div><div class="mission-stats"><div id="integrityBlock" hidden>INTEGRITY<strong id="integrity">100%</strong></div><div>TARGETS<strong id="kills">0 / 1</strong></div><div class="wide">FIRING WINDOW<strong id="timer">NO LIMIT</strong></div></div></div>
  <div class="field-status" id="fieldStatus" hidden>
   <div class="flight" id="flight" hidden><i></i><span id="flightCount">1 IN FLIGHT</span><strong id="flightTime">5.5s</strong></div>
@@ -80,7 +86,7 @@
   </section>
   <section class="optic-controls" id="opticControls" aria-label="Observer optics" hidden>
    <div class="drawer-head"><div class="view-label" id="viewName">OBSERVER / AIM LINKED</div><button class="close-drawer" id="opticsClose" aria-label="Close optics controls">×</button></div>
-   <div class="optics-row"><div class="scope-modes" aria-label="Observer drag behaviour"><button id="scopeAim" aria-label="Aim the mortar by dragging" aria-pressed="true">AIM</button><button id="scopeLook" aria-label="Look around without changing the mortar" aria-pressed="false">LOOK</button></div><button class="centre-button" id="centre"><svg><use href="#i-centre"/></svg>FIND</button><button class="icon-button" id="zoomOut" aria-label="Zoom out"><svg><use href="#i-minus"/></svg></button><span class="mono" id="zoomValue">5.5×</span><button class="icon-button" id="zoomIn" aria-label="Zoom in"><svg><use href="#i-plus"/></svg></button></div>
+   <div class="optics-row"><div class="scope-modes" aria-label="Observer drag behaviour"><button id="scopeAim" aria-label="Aim the weapon by dragging" aria-pressed="true">AIM</button><button id="scopeLook" aria-label="Look around without changing the mortar" aria-pressed="false">LOOK</button></div><button class="centre-button" id="centre"><svg><use href="#i-centre"/></svg>FIND</button><button class="icon-button" id="zoomOut" aria-label="Zoom out"><svg><use href="#i-minus"/></svg></button><span class="mono" id="zoomValue">5.5×</span><button class="icon-button" id="zoomIn" aria-label="Zoom in"><svg><use href="#i-plus"/></svg></button></div>
    <div class="shot-details"><small class="last-lay" id="lastLay" hidden></small><small id="reportDetail" hidden></small></div>
   </section>
   <div class="deck" id="controlDeck">
@@ -91,16 +97,16 @@
  </div>
 </section>
 <section class="menu" id="menu" aria-label="Main menu">
- <header class="menu-top"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE<small>MORTAR FIELD SIMULATOR</small></div><div class="menu-tools"><button class="icon-button" id="menuSound" aria-label="Mute sound" aria-pressed="true"><svg><use href="#i-sound"/></svg></button><button class="icon-button" id="menuFullscreen" aria-label="Fullscreen"><svg><use href="#i-full"/></svg></button><button class="icon-button" id="menuSettings" aria-label="Settings"><svg><use href="#i-settings"/></svg></button></div></header>
+ <header class="menu-top"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE<small>FIELD ARTILLERY SIMULATOR</small></div><div class="menu-tools"><button class="icon-button" id="menuSound" aria-label="Mute sound" aria-pressed="true"><svg><use href="#i-sound"/></svg></button><button class="icon-button" id="menuFullscreen" aria-label="Fullscreen"><svg><use href="#i-full"/></svg></button><button class="icon-button" id="menuSettings" aria-label="Settings"><svg><use href="#i-settings"/></svg></button></div></header>
  <div class="menu-copy"><div class="top-rule"></div><div class="eyebrow">LOAD. LAY. FIRE. OBSERVE.</div><h1><span>THE QUIET.</span><span class="outline">THE SHOT.</span><span>THE IMPACT.</span></h1><p>One crew. A changing battlefield.<br>Read the impact. Make the next shot count.</p></div>
  <aside class="menu-side" aria-hidden="true">FORWARD EMPLACEMENT<strong>SECTOR 07</strong>47° N / FICTIONAL OPERATIONS AREA<br>CONDITIONS: FIRST LIGHT<br>WEAPON STATUS: AWAITING CREW</aside>
- <div class="sector-label"><span>SELECT A FIRE MISSION</span><span>THREE ASSIGNMENTS / ONE WEAPON TO MASTER</span></div>
- <div class="mission-grid"><button class="mission-card" id="mission0"><span class="number">01 / OBSERVATION</span><strong class="mission-name">The Orchard</strong><span class="mission-desc">Find your range. Break a fortified position.</span><span class="mission-status" id="missionStatus0">DEPLOY →</span></button><button class="mission-card" id="mission1" disabled><span class="number">02 / INTERCEPTION</span><strong class="mission-name">Broken Convoy</strong><span class="mission-desc">Track movement. Time the impact.</span><span class="mission-status" id="missionStatus1">COMPLETE MISSION 01</span></button><button class="mission-card" id="mission2" disabled><span class="number">03 / DEFENCE</span><strong class="mission-name">Hold the Relay</strong><span class="mission-desc">Break three waves. Keep the line alive.</span><span class="mission-status" id="missionStatus2">COMPLETE MISSION 02</span></button></div>
- <footer class="menu-footer"><span>FIELD TRIAL 0.4 / BEST WITH SOUND & LANDSCAPE</span><div><button class="text-button" id="menuHelp">HOW TO PLAY</button><span> / </span><button class="text-button" id="download">DOWNLOAD HTML ↓</button></div></footer>
+ <div class="sector-label"><span>SELECT A FIRE MISSION</span><span>THREE ASSIGNMENTS / TWO WEAPONS / ONE RANGE</span></div>
+ <div class="mission-grid"><button class="mission-card" id="mission0"><span class="number">01 / OBSERVATION</span><strong class="mission-name">The Orchard</strong><span class="mission-desc">Find your range. Break a fortified position.</span><span class="mission-status" id="missionStatus0">DEPLOY →</span></button><button class="mission-card" id="mission1" disabled><span class="number">02 / INTERCEPTION</span><strong class="mission-name">Broken Convoy</strong><span class="mission-desc">Track movement. Time the impact.</span><span class="mission-status" id="missionStatus1">COMPLETE MISSION 01</span></button><button class="mission-card" id="mission2" disabled><span class="number">03 / DEFENCE</span><strong class="mission-name">Hold the Relay</strong><span class="mission-desc">Break three waves. Keep the line alive.</span><span class="mission-status" id="missionStatus2">COMPLETE MISSION 02</span></button><button class="mission-card range-card" id="mission3"><span class="number">RANGE / FREE FIRE</span><strong class="mission-name">Test Range</strong><span class="mission-desc">Unlimited rounds. Range boards. Try both weapons.</span><span class="mission-status" id="missionStatus3">OPEN RANGE →</span></button></div>
+ <footer class="menu-footer"><span>FIELD TRIAL 0.5 / BEST WITH SOUND & LANDSCAPE</span><div><button class="text-button" id="menuHelp">HOW TO PLAY</button><span> / </span><button class="text-button" id="download">DOWNLOAD HTML ↓</button></div></footer>
 </section>
-<section class="modal" id="briefing" role="dialog" aria-modal="true" aria-labelledby="briefTitle" hidden><div class="panel"><div class="eyebrow" id="briefNumber">01 / FIRST CORRECTION</div><h2 id="briefTitle">The Orchard</h2><p id="briefText"></p><div class="panel-meta"><div>AMMUNITION<strong id="briefRounds">14 HE / 2 SMOKE</strong></div><div>FIRING WINDOW<strong id="briefClock">NO TIME LIMIT</strong></div></div><div class="brief-how"><b>LOAD → AIM → FIRE → OBSERVE</b>Tap ASSIST in the bottom dock to open corrections, target selection and FOCUS. Load HE, adjust until green, then fire. The panel folds after firing. OPTICS opens zoom, AIM / LOOK and FIND controls. White ring = next landing; blue diamond = estimated moving-target arrival.<br>Manual controls: ↑ elevation brings the shot closer; ↓ elevation sends it further.</div><div class="button-row"><button class="secondary" id="briefBack">BACK</button><button class="primary" id="deploy">TAKE POSITION →</button></div></div></section>
+<section class="modal" id="briefing" role="dialog" aria-modal="true" aria-labelledby="briefTitle" hidden><div class="panel"><div class="eyebrow" id="briefNumber">01 / FIRST CORRECTION</div><h2 id="briefTitle">The Orchard</h2><p id="briefText"></p><div class="panel-meta"><div>AMMUNITION<strong id="briefRounds">14 HE / 2 SMOKE</strong></div><div>FIRING WINDOW<strong id="briefClock">NO TIME LIMIT</strong></div></div><div class="weapon-pick" role="group" aria-label="Weapon"><button id="pickMortar" aria-pressed="true"><b>MORTAR</b><small>110–275 M · HIGH ARC<br>FAST RELOAD · MORE ROUNDS</small></button><button id="pickM777" aria-pressed="false"><b>M777 HOWITZER</b><small>145–385 M · FLAT AND FAST<br>HEAVY SHELL · SLOW RELOAD</small></button></div><div class="brief-how"><b>LOAD → AIM → FIRE → OBSERVE</b>Tap ASSIST in the bottom dock to open corrections, target selection and FOCUS. Load HE, adjust until green, then fire. The panel folds after firing. OPTICS opens zoom, AIM / LOOK and FIND controls. White ring = next landing; blue diamond = estimated moving-target arrival.<br>Manual controls: on the mortar, ↑ elevation brings the shot closer. The M777 fires low, so ↑ elevation sends it further.</div><div class="button-row"><button class="secondary" id="briefBack">BACK</button><button class="primary" id="deploy">TAKE POSITION →</button></div></div></section>
 <section class="modal" id="pausePanel" role="dialog" aria-modal="true" aria-labelledby="pauseTitle" hidden><div class="panel"><div class="eyebrow">WEAPON SAFE / SIMULATION PAUSED</div><h2 id="pauseTitle">Hold fire.</h2><p>Your rounds, targets, and mission clock are paused.</p><div class="button-row"><button class="primary" id="resume">RESUME MISSION →</button><button class="secondary" id="pauseHelp">HOW TO PLAY</button><button class="secondary" id="pauseSettings">SETTINGS</button><button class="secondary" id="quit">MISSION SELECT</button></div></div></section>
-<section class="modal" id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden><div class="panel"><div class="eyebrow">CREW INDUCTION / TOUCH CONTROLS</div><h2 id="helpTitle">Make the correction.</h2><ol class="help-list"><li><span class="step">01</span><strong>Load deliberately.</strong>Select HE or SMOKE. Swipe the LOAD button upward, or tap it. Wait for the shell to seat.</li><li><span class="step">02</span><strong>Lay the weapon.</strong>Tap ASSIST in the bottom dock. With AID ON, hold the suggested correction buttons until they stop. The white NEXT ROUND ring turns green when aligned. For moving targets, align with the blue ARRIVAL diamond and fire while green. Manual controls: drag the AIM pad or tap/hold its arrows. ↑ elevation brings impacts closer; ↓ sends them further. FINE reduces sensitivity.</li><li><span class="step">03</span><strong>Fire, then observe.</strong>Tap FIRE. By default the observer optics open automatically. AIM is selected by default: dragging the scene adjusts the mortar. Select LOOK to move the optics only. Tap OPTICS for ± zoom, FIND and AIM / LOOK. Open ASSIST and tap the vehicle name for the next target; TRACK follows it with the camera. Dragging in LOOK turns tracking off. The pad and arrows always adjust the gun.</li><li><span class="step">04</span><strong>Read the miss.</strong>Dust, craters, and the LAST IMPACT ring show where your round landed. SHORT: lower elevation. LONG: raise it. BEHIND MOVING TARGET means it travelled past your impact. Recheck the arrival estimate before each round.</li><li><span class="step">05</span><strong>Keep the line alive.</strong>HE damages targets. SMOKE slows targets within its screen for 20 seconds. FOCUS runs flight, target movement and deadlines at half speed while aiming stays responsive. In the final mission, firing raises exposure. RELOCATE when an incoming strike is announced.</li></ol><p class="help-notice">The white NEXT ROUND marker predicts the next landing point; green means good aim. The blue ARRIVAL diamond estimates a moving target’s position for that flight time. It updates for turns, smoke and suppression; another explosion can change movement after you fire. The central optic reticle is a viewing reference. LAST records the previous shot; numbered craters show actual impacts. ASSIST folds away without disabling guidance. AID OFF inside that panel restores manual aiming. Practice and movement assistance have separate preferences.</p><div class="key-help">DESKTOP: arrows / WASD = lay · SPACE = load / fire<br>O = change view · F / hold SHIFT = fine · C = find target · P = pause</div><div class="button-row"><button class="primary" id="helpClose">UNDERSTOOD →</button></div></div></section>
+<section class="modal" id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden><div class="panel"><div class="eyebrow">CREW INDUCTION / TOUCH CONTROLS</div><h2 id="helpTitle">Make the correction.</h2><ol class="help-list"><li><span class="step">01</span><strong>Load deliberately.</strong>Select HE or SMOKE. Swipe the LOAD button upward, or tap it. Wait for the shell to seat.</li><li><span class="step">02</span><strong>Lay the weapon.</strong>Tap ASSIST in the bottom dock. With AID ON, hold the suggested correction buttons until they stop. The white NEXT ROUND ring turns green when aligned. For moving targets, align with the blue ARRIVAL diamond and fire while green. Manual controls: drag the AIM pad or tap/hold its arrows. Mortar: ↑ elevation brings impacts closer. M777 (low angle): ↑ elevation sends them further. FINE reduces sensitivity.</li><li><span class="step">03</span><strong>Fire, then observe.</strong>Tap FIRE. By default the observer optics open automatically. AIM is selected by default: dragging the scene adjusts the mortar. Select LOOK to move the optics only. Tap OPTICS for ± zoom, FIND and AIM / LOOK. Open ASSIST and tap the vehicle name for the next target; TRACK follows it with the camera. Dragging in LOOK turns tracking off. The pad and arrows always adjust the gun.</li><li><span class="step">04</span><strong>Read the miss.</strong>Dust, craters, and the LAST IMPACT ring show where your round landed. SHORT: lower elevation on the mortar, raise it on the M777. LONG: the opposite. BEHIND MOVING TARGET means it travelled past your impact. Recheck the arrival estimate before each round.</li><li><span class="step">05</span><strong>Keep the line alive.</strong>HE damages targets. SMOKE slows targets within its screen for 20 seconds. FOCUS runs flight, target movement and deadlines at half speed while aiming stays responsive. In the final mission, firing raises exposure. RELOCATE when an incoming strike is announced.</li></ol><p class="help-notice">The white NEXT ROUND marker predicts the next landing point; green means good aim. The blue ARRIVAL diamond estimates a moving target’s position for that flight time. It updates for turns, smoke and suppression; another explosion can change movement after you fire. The central optic reticle is a viewing reference. LAST records the previous shot; numbered craters show actual impacts. ASSIST folds away without disabling guidance. AID OFF inside that panel restores manual aiming. Practice and movement assistance have separate preferences.</p><div class="key-help">DESKTOP: arrows / WASD = lay · SPACE = load / fire<br>O = change view · F / hold SHIFT = fine · C = find target · P = pause</div><div class="button-row"><button class="primary" id="helpClose">UNDERSTOOD →</button></div></div></section>
 <section class="modal" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden><div class="panel"><div class="eyebrow">FIELD PREFERENCES</div><h2 id="settingsTitle">Your station.</h2><label class="setting" for="settingSound"><span>Weapon & battlefield audio<small>Synthesised audio; headphones recommended.</small></span><input type="checkbox" id="settingSound" checked></label><label class="setting" for="settingAuto"><span>Observe after firing<small>Switch to optics automatically with each shot.</small></span><input type="checkbox" id="settingAuto" checked></label><label class="setting" for="settingPractice"><span>Practice aiming aid<small>Mission 01: landing preview, guided corrections and auto fine.</small></span><input type="checkbox" id="settingPractice" checked></label><label class="setting" for="settingMoving"><span>Moving-target observer aid<small>Arrival estimate, guided corrections and auto fine in Missions 02–03.</small></span><input type="checkbox" id="settingMoving" checked></label><label class="setting" for="settingShake"><span>Camera shake<small>Physical feedback on firing and nearby impacts.</small></span><input type="checkbox" id="settingShake" checked></label><label class="setting" for="settingHaptics"><span>Touch vibration<small>Used when supported by your device.</small></span><input type="checkbox" id="settingHaptics" checked></label><label class="setting" for="settingQuality"><span>Render quality<small>Auto adjusts resolution to maintain responsiveness.</small></span><select id="settingQuality"><option value="auto">Adaptive</option><option value="high">High</option><option value="low">Battery saver</option></select></label><div class="privacy">Progress and preferences are saved on this device. No account, advertising, or network connection is needed for the downloaded HTML.</div><div class="button-row"><button class="primary" id="settingsClose">RETURN →</button></div></div></section>
 <section class="modal" id="result" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden><div class="panel"><div class="eyebrow" id="resultEyebrow">FIRE MISSION COMPLETE</div><h2 id="resultTitle">Sector secured.</h2><p id="resultReason">Sector secured</p><div class="result-stars" id="resultStars" aria-label="Mission rating">★★★</div><div class="result-stats"><div><strong id="statRounds">0</strong>ROUNDS FIRED</div><div><strong id="statAccuracy">0%</strong>HE EFFECT RATE</div><div><strong id="statTargets">0/1</strong>TARGETS</div><div><strong id="statTime">00:00</strong>ELAPSED</div></div><p id="resultTip"></p><div class="button-row"><button class="primary" id="next">NEXT ASSIGNMENT →</button><button class="secondary" id="retry">REPLAY</button><button class="secondary" id="resultMenu">MISSION SELECT</button></div></div></section>
 <div class="boot" id="boot"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE</div><div class="loading-bar"></div><span>PREPARING THE EMPLACEMENT</span></div>
@@ -208,6 +214,20 @@ var FL;
 var FL;
 (function (FL) {
     FL.FIELD_BALLISTICS = Object.freeze({ speed: 88, gravity: 28, windScale: .16, launchHeight: 1.8, maxAge: 14 });
+    /** Each weapon pairs a ballistic profile with its handling, crew timings and shell effect. */
+    FL.WEAPONS = Object.freeze({
+        mortar: Object.freeze({ id: "mortar", name: "MORTAR", position: "MORTAR POSITION", ballistics: FL.FIELD_BALLISTICS, yawLimit: 34, minElevation: 46, maxElevation: 78, loadTime: 1.55, cycleTime: .52, relocateTime: 3.5, lethalRadius: 21, directRadius: 4, damage: 105, directDamage: 115, suppressRadius: 34, exposure: 19, rounds: 1 }),
+        m777: Object.freeze({ id: "m777", name: "M777", position: "HOWITZER POSITION", ballistics: Object.freeze({ speed: 104, gravity: 28, windScale: .12, launchHeight: 2.4, maxAge: 14 }), yawLimit: 25, minElevation: 10, maxElevation: 72, loadTime: 3.4, cycleTime: 1.5, relocateTime: 5.5, lethalRadius: 24, directRadius: 5, damage: 112, directDamage: 140, suppressRadius: 40, exposure: 27, rounds: .7 })
+    });
+    /** Converts a mortar starting lay to the howitzer's low-angle lay for roughly the same range. */
+    FL.startElevation = (weapon, mortarElevation) => {
+        if (weapon.id === "mortar")
+            return mortarElevation;
+        const mortar = FL.FIELD_BALLISTICS, profile = weapon.ballistics;
+        const range = mortar.speed * mortar.speed * Math.sin(2 * mortarElevation * FL.DEG) / mortar.gravity;
+        const elevation = Math.asin(FL.clamp(range * profile.gravity / (profile.speed * profile.speed), 0, 1)) / 2 / FL.DEG;
+        return FL.clamp(elevation, weapon.minElevation, weapon.maxElevation);
+    };
     /** Actual shells and training forecasts share this integration and swept collision code. */
     class Ballistics {
         constructor(profile = FL.FIELD_BALLISTICS) {
@@ -330,8 +350,13 @@ var FL;
                 { at: 0, targets: [{ kind: "section", x: -20, z: 235, hp: 85, speed: 0.8, route: 0, name: "WEST APPROACH" }, { kind: "section", x: 30, z: 245, hp: 85, speed: 0.7, route: 0, name: "EAST APPROACH" }] },
                 { at: 38, targets: [{ kind: "truck", x: -38, z: 248, hp: 90, speed: 1.0, route: 0, name: "ASSAULT TRANSPORT" }, { kind: "section", x: 18, z: 258, hp: 85, speed: 0.9, route: 0, name: "SECOND SECTION" }] },
                 { at: 77, targets: [{ kind: "section", x: -15, z: 255, hp: 95, speed: 1.1, route: 0, name: "FINAL WEST SECTION" }, { kind: "truck", x: 42, z: 252, hp: 100, speed: 1.0, route: 0, name: "FINAL TRANSPORT" }] }
-            ] }
+            ] },
+        { id: 3, sandbox: true, name: "Test Range", subtitle: "RANGE / FREE FIRE", briefing: "No clock, no limit on rounds and no way to fail. Boards on the right of the lane mark every 50 m. Targets come back a few seconds after they are destroyed, and the road truck never stops. Tap WIND at the top to change it. The mortar reaches about 110 to 275 m; the M777 reaches about 145 to 385 m, so the two far bunkers are howitzer work.", task: "Free fire. Boards mark every 50 m", rounds: 0, smoke: 0, limit: 0, par: 0, wind: 0, elevation: 67, yaw: 0,
+            boards: [100, 150, 200, 250, 300, 350, 400],
+            waves: [{ at: 0, targets: [{ kind: "position", x: -18, z: 150, hp: 130, speed: 0, route: 0, name: "150 M BUNKER" }, { kind: "section", x: 24, z: 205, hp: 85, speed: 0, route: 0, name: "205 M SECTION" }, { kind: "truck", x: -30, z: 228, hp: 85, speed: 1.2, route: 1, name: "ROAD TRUCK" }, { kind: "position", x: -22, z: 320, hp: 130, speed: 0, route: 0, name: "320 M BUNKER" }, { kind: "position", x: 26, z: 370, hp: 130, speed: 0, route: 0, name: "370 M BUNKER" }] }] }
     ];
+    FL.RANGE_WINDS = [0, 1.5, -1.5, 3, -3];
+    FL.RANGE_BOARD_X = 46;
     class Terrain {
         constructor() {
             this.craters = [];
@@ -417,9 +442,14 @@ var FL;
             this.serial = 0;
             this.loadingAmmo = "he";
             this.dryClock = 0;
+            this.weapon = FL.WEAPONS.mortar;
+            this.rangeWind = 0;
         }
-        start(id) {
+        start(id, weaponId = "mortar") {
             this.mission = FL.MISSIONS[FL.clamp(Math.floor(id), 0, FL.MISSIONS.length - 1)];
+            this.weapon = FL.WEAPONS[weaponId] ?? FL.WEAPONS.mortar;
+            this.ballistics.profile = this.weapon.ballistics;
+            this.rangeWind = 0;
             this.phase = "active";
             this.paused = false;
             this.time = 0;
@@ -428,7 +458,7 @@ var FL;
             this.chamber = null;
             this.selectedAmmo = "he";
             this.yaw = this.mission.yaw;
-            this.elevation = this.mission.elevation;
+            this.elevation = FL.startElevation(this.weapon, this.mission.elevation);
             this.originX = 0;
             this.originZ = 0;
             this.shots = 0;
@@ -452,8 +482,8 @@ var FL;
             this.commands.length = 0;
             this.bus.clear();
             this.terrain.reset();
-            this.inventory.he = this.mission.rounds;
-            this.inventory.smoke = this.mission.smoke;
+            this.inventory.he = this.mission.sandbox ? 99 : Math.max(1, Math.round(this.mission.rounds * this.weapon.rounds));
+            this.inventory.smoke = this.mission.sandbox ? 99 : this.mission.smoke;
             for (const shell of this.shells) {
                 shell.active = false;
                 shell.lay = null;
@@ -494,20 +524,25 @@ var FL;
         get airborne() { let n = 0; for (const s of this.shells)
             if (s.active)
                 n++; return n; }
-        get loadingProgress() { return this.state === "loading" ? FL.clamp(1 - this.stateRemaining / 1.55, 0, 1) : 0; }
+        get loadingProgress() { return this.state === "loading" ? FL.clamp(1 - this.stateRemaining / this.weapon.loadTime, 0, 1) : 0; }
         get stars() { return this.phase !== "won" ? 0 : this.heShots <= this.mission.par && this.integrity >= 75 ? 3 : this.heShots <= this.mission.par + 5 && this.integrity >= 45 ? 2 : 1; }
-        wind() { return this.mission.wind + Math.sin(this.time * 0.07) * 0.35; }
+        wind() { return this.mission.sandbox && this.rangeWind === 0 ? 0 : (this.mission.sandbox ? this.rangeWind : this.mission.wind) + Math.sin(this.time * 0.07) * 0.35; }
         changeState(state, remaining = 0) { this.state = state; this.stateRemaining = remaining; this.bus.emit({ type: "weapon", state }); }
         consume(command) {
             if (command.type === "aim") {
                 if (this.state !== "relocating" && Number.isFinite(command.yaw) && Number.isFinite(command.elevation)) {
-                    this.yaw = FL.clamp(this.yaw + command.yaw, -34, 34);
-                    this.elevation = FL.clamp(this.elevation + command.elevation, 46, 78);
+                    this.yaw = FL.clamp(this.yaw + command.yaw, -this.weapon.yawLimit, this.weapon.yawLimit);
+                    this.elevation = FL.clamp(this.elevation + command.elevation, this.weapon.minElevation, this.weapon.maxElevation);
                 }
                 return;
             }
             if (command.type === "ammo") {
                 this.selectedAmmo = command.ammo;
+                return;
+            }
+            if (command.type === "wind") {
+                if (this.mission.sandbox)
+                    this.rangeWind = FL.RANGE_WINDS[(FL.RANGE_WINDS.indexOf(this.rangeWind) + 1) % FL.RANGE_WINDS.length];
                 return;
             }
             if (command.type === "designate") {
@@ -523,13 +558,13 @@ var FL;
                     return;
                 }
                 this.loadingAmmo = this.selectedAmmo;
-                this.changeState("loading", 1.55);
+                this.changeState("loading", this.weapon.loadTime);
                 return;
             }
             if (command.type === "relocate") {
                 if (this.mission.id !== 2 || (this.state !== "empty" && this.state !== "ready"))
                     return;
-                this.changeState("relocating", 3.5);
+                this.changeState("relocating", this.weapon.relocateTime);
                 this.bus.emit({ type: "toast", text: "Moving to the alternate emplacement…", urgent: false });
                 return;
             }
@@ -562,16 +597,16 @@ var FL;
             this.shots++;
             if (shell.ammo === "he")
                 this.heShots++;
-            this.exposure = FL.clamp(this.exposure + 19, 0, 100);
+            this.exposure = FL.clamp(this.exposure + this.weapon.exposure, 0, 100);
             this.chamber = null;
-            this.changeState("cycling", 0.52);
+            this.changeState("cycling", this.weapon.cycleTime);
             this.bus.emit({ type: "shot", shell });
         }
         spawnDue() {
             while (this.wave < this.mission.waves.length && this.mission.waves[this.wave].at <= this.time) {
                 const wave = this.mission.waves[this.wave++];
                 for (const spec of wave.targets)
-                    this.targets.push({ id: this.targets.length, kind: spec.kind, name: spec.name, x: spec.x, z: spec.z, routeZ: spec.z, y: this.terrain.height(spec.x, spec.z), hp: spec.hp, maxHp: spec.hp, speed: spec.speed, route: spec.route, direction: 1, yaw: spec.route ? Math.PI / 2 : Math.PI, suppressed: 0, damageClock: 0, deadAt: -1 });
+                    this.targets.push({ id: this.targets.length, kind: spec.kind, name: spec.name, x: spec.x, z: spec.z, spawnX: spec.x, routeZ: spec.z, y: this.terrain.height(spec.x, spec.z), hp: spec.hp, maxHp: spec.hp, speed: spec.speed, route: spec.route, direction: 1, yaw: spec.route ? Math.PI / 2 : Math.PI, suppressed: 0, damageClock: 0, deadAt: -1 });
                 this.bus.emit({ type: "spawn", wave: this.wave });
             }
         }
@@ -589,7 +624,8 @@ var FL;
                 if (this.stateRemaining === 0) {
                     if (this.state === "loading") {
                         if (this.inventory[this.loadingAmmo] > 0) {
-                            this.inventory[this.loadingAmmo]--;
+                            if (!this.mission.sandbox)
+                                this.inventory[this.loadingAmmo]--;
                             this.chamber = this.loadingAmmo;
                             this.changeState("ready");
                         }
@@ -659,7 +695,20 @@ var FL;
                     }
                 }
             }
-            if (this.kills >= this.totalTargets && this.wave === this.mission.waves.length)
+            if (this.mission.sandbox) {
+                // Range targets return after a short pause so practice never runs dry.
+                for (const target of this.targets)
+                    if (target.hp <= 0 && this.time - target.deadAt > 6) {
+                        target.hp = target.maxHp;
+                        target.deadAt = -1;
+                        target.x = target.spawnX;
+                        target.z = target.routeZ;
+                        target.direction = 1;
+                        target.suppressed = 0;
+                        target.y = this.terrain.height(target.x, target.z);
+                    }
+            }
+            else if (this.kills >= this.totalTargets && this.wave === this.mission.waves.length)
                 this.finish("won", "Sector secured");
             else if (this.integrity <= 0)
                 this.finish("lost", "The defensive line was overrun");
@@ -682,8 +731,8 @@ var FL;
                     if (target.hp <= 0)
                         continue;
                     const d = FL.distance(shell.x, shell.z, target.x, target.z);
-                    if (d < 21) {
-                        const hit = d < 4 ? 115 : Math.max(0, 105 * (1 - d / 21));
+                    if (d < this.weapon.lethalRadius) {
+                        const hit = d < this.weapon.directRadius ? this.weapon.directDamage : Math.max(0, this.weapon.damage * (1 - d / this.weapon.lethalRadius));
                         target.hp = Math.max(0, target.hp - hit);
                         damage += hit;
                         target.suppressed = 6;
@@ -692,7 +741,7 @@ var FL;
                             this.kills++;
                         }
                     }
-                    else if (d < 34 && this.mission.id !== 1)
+                    else if (d < this.weapon.suppressRadius && this.mission.id !== 1)
                         target.suppressed = 2;
                 }
                 if (damage > 0)
@@ -844,7 +893,7 @@ var FL;
             this.precision = miss < (this.precision ? 19 : 12);
             // Enter inside the useful area and tolerate small wind drift while the player presses Fire.
             this.aligned = miss <= (this.aligned ? 8 : 6.5);
-            const yawStep = sim.yaw > 33.5 ? -.25 : .25, elevationStep = sim.elevation > 77.5 ? -.25 : .25;
+            const yawStep = sim.yaw > sim.weapon.yawLimit - .5 ? -.25 : .25, elevationStep = sim.elevation > sim.weapon.maxElevation - .5 ? -.25 : .25;
             const yawProbe = sim.ballistics.predict(sim.terrain, sim.originX, sim.originZ, sim.yaw + yawStep, sim.elevation, wind);
             const elevationProbe = sim.ballistics.predict(sim.terrain, sim.originX, sim.originZ, sim.yaw, sim.elevation + elevationStep, wind);
             let yaw = 0, elevation = 0;
@@ -1214,8 +1263,10 @@ void main(){vec4 p=uVP*vec4(aPosition,1.);gl_Position=p;gl_PointSize=clamp(aSize
                 if (event.report.ammo === "he")
                     this.particles.add(event.report.x, y, event.report.z, 2, 17);
             }
-            else if (event.type === "shot")
-                this.particles.add(this.simulation.originX, this.simulation.terrain.height(this.simulation.originX, this.simulation.originZ) + 2, this.simulation.originZ + .5, 0, 8);
+            else if (event.type === "shot") {
+                const heavy = this.simulation.weapon.id === "m777";
+                this.particles.add(this.simulation.originX, this.simulation.terrain.height(this.simulation.originX, this.simulation.originZ) + (heavy ? 2.6 : 2), this.simulation.originZ + (heavy ? 4 : .5), 0, heavy ? 22 : 8);
+            }
             else if (event.type === "damage" && event.amount > 20) {
                 this.particles.add(event.x, this.simulation.terrain.height(event.x, event.z), event.z, 0, 55);
                 this.particles.add(event.x, 1, event.z, 2, 25);
@@ -1294,6 +1345,49 @@ void main(){vec4 p=uVP*vec4(aPosition,1.);gl_Position=p;gl_PointSize=clamp(aSize
                 }
             }
         }
+        drawHowitzer(state, now) {
+            const sim = this.simulation, narrow = FL.clamp((1 - this.width / this.height) / .55, 0, 1);
+            const sway = Math.sin(now * .7) * .005, relocate = sim.state === "relocating" ? Math.sin(sim.time * 6) * .08 - .5 : 0;
+            const px = .78 + sway, py = -.9 - narrow * .45 + relocate, pz = 2.5 + narrow * 1.3;
+            const tilt = (90 - sim.elevation) * FL.DEG, yaw = sim.yaw * FL.DEG * .45;
+            // Barrel axis follows the local Y axis produced by compose(yaw, pitch).
+            const dx = Math.sin(yaw) * Math.sin(tilt), dy = Math.cos(tilt), dz = Math.cos(yaw) * Math.sin(tilt);
+            const ux = -Math.sin(yaw) * Math.cos(tilt), uy = Math.sin(tilt), uz = -Math.cos(yaw) * Math.cos(tilt);
+            const olive = [.36, .38, .27], dark = [.12, .14, .12], tyre = [.06, .07, .06], metal = [.45, .46, .37];
+            const at = (along, up = 0) => [px + dx * along + ux * up, py + dy * along + uy * up, pz + dz * along + uz * up];
+            // Carriage, wheels and split trails stay level while the cradle elevates.
+            this.draw("box", px, py - .55, pz - .1, 1.7, .26, 1.3, olive, yaw);
+            this.draw("box", px, py - .25, pz, .55, .5, .5, dark, yaw);
+            for (const side of [-1, 1]) {
+                this.draw("cylinder", px + side * 1.05 - (side < 0 ? .32 : 0), py - .6, pz - .15, .56, .32, .56, tyre, Math.PI / 2, Math.PI / 2);
+                this.draw("cylinder", px + side * 1.05 - (side < 0 ? .34 : -.01), py - .6, pz - .15, .24, .34, .24, metal, Math.PI / 2, Math.PI / 2);
+                const fx = px + side * .45, fz = pz - .3, bx = px + side * 1.9, bz = pz - 3.2;
+                this.draw("box", (fx + bx) / 2, py - .72, (fz + bz) / 2, .26, .22, Math.hypot(bx - fx, bz - fz), olive, Math.atan2(bx - fx, bz - fz));
+            }
+            // The tube recoils along its own axis.
+            const recoil = state.recoil * .9;
+            const breech = at(-1.35 - recoil);
+            this.draw("tube", breech[0], breech[1], breech[2], .15, 5.8, .15, [1, 1, 1], yaw, tilt);
+            const cradle = at(.35, .02);
+            this.draw("box", cradle[0], cradle[1], cradle[2], .44, 1.9, .44, olive, yaw, tilt);
+            for (const up of [.26, -.24]) {
+                const r = at(-.75 - recoil * .2, up);
+                this.draw("cylinder", r[0], r[1], r[2], .085, 2.5, .085, up > 0 ? metal : olive, yaw, tilt);
+            }
+            const block = at(-1.25 - recoil);
+            this.draw("box", block[0], block[1], block[2], .36, .42, .36, dark, yaw, tilt);
+            const brake = at(4.4 - recoil);
+            this.draw("box", brake[0], brake[1], brake[2], .38, .3, .3, dark, yaw, tilt);
+            const sight = at(.1, .1);
+            this.draw("box", sight[0] - .36, sight[1] + .1, sight[2], .2, .26, .3, dark, yaw);
+            this.draw("box", sight[0] - .36, sight[1] + .1, sight[2] - .16, .13, .09, .012, [.40, .62, .47], yaw);
+            if (sim.state === "loading") {
+                const p = sim.loadingProgress, travel = FL.smooth(0, .75, p), seat = FL.smooth(.75, 1, p), start = [-.15, -.8, 1.3], end = at(-1.2 + seat * .8);
+                const hx = FL.mix(start[0], end[0], travel), hy = FL.mix(start[1], end[1], travel), hz = FL.mix(start[2], end[2], travel);
+                this.draw("cylinder", hx, hy, hz, .1, .62 * (1 - seat * .8), .1, sim.chamber === "smoke" || sim.selectedAmmo === "smoke" ? [.65, .66, .57] : [.45, .46, .29], yaw * travel, tilt * travel + (1 - travel) * 1.2);
+                this.draw("box", hx - .2, hy - .05, hz - .12, .3, .22, .22, [.27, .24, .17], 0, -.25);
+            }
+        }
         drawWeapon(state, now) {
             const gl = this.gl, sim = this.simulation;
             gl.clear(gl.DEPTH_BUFFER_BIT);
@@ -1303,6 +1397,11 @@ void main(){vec4 p=uVP*vec4(aPosition,1.);gl_Position=p;gl_PointSize=clamp(aSize
             gl.uniformMatrix4fv(this.uniforms.uVP, false, this.weaponVP);
             gl.uniform1f(this.uniforms.uOverlay, 1);
             gl.uniform3f(this.uniforms.uEye, 0, 0, 0);
+            if (sim.weapon.id === "m777") {
+                this.drawHowitzer(state, now);
+                gl.uniform1f(this.uniforms.uOverlay, 0);
+                return;
+            }
             const sway = Math.sin(now * .8) * .007, recoil = state.recoil * .16, relocate = sim.state === "relocating" ? Math.sin(sim.time * 8) * .10 - .4 : 0;
             // Narrow portrait views set the weapon further back so it does not cover the aim point.
             const narrow = FL.clamp((1 - this.width / this.height) / .55, 0, 1);
@@ -1372,6 +1471,13 @@ void main(){vec4 p=uVP*vec4(aPosition,1.);gl_Position=p;gl_PointSize=clamp(aSize
             this.draw("world");
             for (const target of sim.targets)
                 this.target(target);
+            if (!state.menu)
+                for (const z of sim.mission.boards ?? []) {
+                    const y = sim.terrain.height(FL.RANGE_BOARD_X, z);
+                    this.draw("cylinder", FL.RANGE_BOARD_X, y, z, .14, 3.4, .14, [.30, .27, .20], 0, 0);
+                    this.draw("box", FL.RANGE_BOARD_X, y + 3.6, z, 3.4, 1.7, .12, [.86, .82, .66]);
+                    this.draw("box", FL.RANGE_BOARD_X, y + 3.6, z - .07, 3.0, .32, .04, [.70, .36, .22]);
+                }
             if (state.menu && sim.targets.length === 0)
                 this.target({ id: 0, kind: "position", name: "", x: -12, z: 213, y: sim.terrain.height(-12, 213), hp: 100, maxHp: 100, speed: 0, route: 0, routeZ: 213, direction: 1, yaw: 0, suppressed: 0, damageClock: 0, deadAt: -1 });
             gl.useProgram(this.fxProgram);
@@ -1601,10 +1707,64 @@ var FL;
                         }
                     }
             }
+            if (this.sim.targets.length)
+                for (const z of this.sim.mission.boards ?? []) {
+                    const y = this.sim.terrain.height(FL.RANGE_BOARD_X, z);
+                    g.box(FL.RANGE_BOARD_X, y + 1.7, z, .2, 3.4, .2, [.30, .27, .20]);
+                    g.box(FL.RANGE_BOARD_X, y + 3.6, z, 3.4, 1.7, .12, [.86, .82, .66]);
+                }
             return g;
+        }
+        howitzer(state, now) {
+            const ctx = this.context, w = this.width, h = this.height, sim = this.sim;
+            const bx = w * .6 + Math.sin(now * .7) * w * .002, by = h * .9 + (sim.state === "relocating" ? h * .1 : 0);
+            const tx = w * (.53 + sim.yaw * .0011), ty = h * (.62 - (sim.elevation - 10) * .007), radius = FL.clamp(w * .012, 8, 18);
+            ctx.save();
+            for (const side of [-1, 1]) {
+                ctx.strokeStyle = "#2a3424";
+                ctx.lineWidth = radius * 1.4;
+                ctx.beginPath();
+                ctx.moveTo(bx + side * radius * 3, by + radius);
+                ctx.lineTo(bx + side * w * .3, h * 1.05);
+                ctx.stroke();
+            }
+            const angle = Math.atan2(ty - by, tx - bx), length = Math.hypot(tx - bx, ty - by), kick = state.recoil * radius * 5;
+            ctx.translate(bx, by);
+            ctx.rotate(angle);
+            ctx.fillStyle = "#3d4a33";
+            ctx.fillRect(-radius * 2 - kick, -radius * 1.6, radius * 7, radius * 3.2);
+            const barrel = ctx.createLinearGradient(0, -radius, 0, radius);
+            barrel.addColorStop(0, "#202b20");
+            barrel.addColorStop(.3, "#6f794f");
+            barrel.addColorStop(1, "#1d281d");
+            ctx.fillStyle = barrel;
+            ctx.fillRect(-radius * 2.5 - kick, -radius * .8, length + radius * 2.5, radius * 1.6);
+            ctx.fillStyle = "#151d16";
+            ctx.fillRect(length - radius * 1.2 - kick, -radius * 1.2, radius * 2, radius * 2.4);
+            ctx.restore();
+            for (const side of [-1, 1]) {
+                ctx.fillStyle = "#111712";
+                ctx.beginPath();
+                ctx.arc(bx + side * radius * 5.5, by + radius * 1.5, radius * 3.2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#5d6446";
+                ctx.beginPath();
+                ctx.arc(bx + side * radius * 5.5, by + radius * 1.5, radius * 1.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (sim.state === "loading") {
+                const p = sim.loadingProgress, move = FL.smooth(0, .8, p);
+                ctx.fillStyle = sim.selectedAmmo === "smoke" ? "#c4c4a9" : "#8b8c50";
+                ctx.beginPath();
+                ctx.roundRect(FL.mix(w * .2, bx - radius * 3, move), FL.mix(h * .75, by - radius, move), radius * 3.4, radius * 1.2, radius * .6);
+                ctx.fill();
+            }
+            ctx.restore();
         }
         weapon(state, now) {
             const ctx = this.context, w = this.width, h = this.height, sim = this.sim;
+            if (sim.weapon.id === "m777")
+                return this.howitzer(state, now);
             const bx = w * .53 + Math.sin(now * .8) * w * .002, by = h * .96 + state.recoil * h * .025 + (sim.state === "relocating" ? h * .1 : 0), tx = w * (.51 + sim.yaw * .0011), ty = h * (.43 + (sim.elevation - 65) * .004) + state.recoil * h * .025;
             // The cylinder is painted in local coordinates so aim and recoil remain continuous.
             ctx.save();
@@ -1857,7 +2017,13 @@ var FL;
         click() { this.burst(.07, .12, 2800); }
         load() { this.burst(.3, .22, 1200); this.tone(380, 120, .18, .08, .6); this.burst(.14, .22, 2200, 1.1); }
         ready() { this.burst(.13, .2, 3500); }
-        fire() { this.tone(115, 28, .8, .9); this.burst(.95, .85, 2100); this.burst(.25, .55, 5500); this.burst(1.2, .18, 500, .16); }
+        fire(heavy = false) { if (heavy) {
+            this.tone(70, 18, 1.3, 1);
+            this.burst(1.5, .95, 1300);
+            this.burst(.3, .6, 4200);
+            this.burst(2.2, .25, 380, .2);
+            return;
+        } this.tone(115, 28, .8, .9); this.burst(.95, .85, 2100); this.burst(.25, .55, 5500); this.burst(1.2, .18, 500, .16); }
         impact() { this.tone(72, 24, .9, .4); this.burst(1.35, .52, 900); this.burst(.23, .18, 3000); }
         smoke() { this.burst(.65, .23, 1400); }
         success() { this.tone(330, 330, .5, .12); this.tone(440, 440, .5, .12, .16); this.tone(660, 660, .7, .13, .32); }
@@ -1940,7 +2106,7 @@ var FL;
             requestAnimationFrame((now) => this.frame(now));
         }
         readSave() {
-            const fallback = { version: 1, best: [0, 0, 0], settings: { sound: true, shake: true, autoSpot: true, quality: "auto", haptics: true, practiceAssist: true, movingAssist: true } };
+            const fallback = { version: 1, best: [0, 0, 0], settings: { sound: true, shake: true, autoSpot: true, quality: "auto", haptics: true, practiceAssist: true, movingAssist: true, weapon: "mortar" } };
             try {
                 const raw = localStorage.getItem("fireline.field.v1");
                 if (!raw)
@@ -1957,6 +2123,8 @@ var FL;
                             fallback.settings[key] = data.settings[key];
                     if (["auto", "high", "low"].includes(data.settings.quality))
                         fallback.settings.quality = data.settings.quality;
+                    if (data.settings.weapon in FL.WEAPONS)
+                        fallback.settings.weapon = data.settings.weapon;
                 }
             }
             catch { /* Local play remains available when browser storage is restricted. */ }
@@ -1972,6 +2140,9 @@ var FL;
             for (let i = 0; i < FL.MISSIONS.length; i++)
                 element(`mission${i}`).addEventListener("click", () => this.brief(i));
             element("deploy").addEventListener("click", () => this.startMission(this.pendingMission));
+            for (const [id, weapon] of [["pickMortar", "mortar"], ["pickM777", "m777"]])
+                element(id).addEventListener("click", () => { this.save.settings.weapon = weapon; this.persist(); this.sound.click(); this.updateBrief(); });
+            element("windBlock").addEventListener("click", () => { this.sim.enqueue({ type: "wind" }); this.sound.click(); });
             element("briefBack").addEventListener("click", () => { this.closeModal(); element("menu").hidden = false; });
             element("helpButton").addEventListener("click", () => this.openModal("help"));
             element("menuHelp").addEventListener("click", () => this.openModal("help"));
@@ -1985,7 +2156,7 @@ var FL;
             element("quit").addEventListener("click", () => this.returnToMenu());
             element("retry").addEventListener("click", () => this.startMission(this.sim.mission.id));
             element("resultMenu").addEventListener("click", () => this.returnToMenu());
-            element("next").addEventListener("click", () => { const next = this.sim.mission.id + 1; this.returnToMenu(); if (next < FL.MISSIONS.length)
+            element("next").addEventListener("click", () => { const next = this.sim.mission.id + 1; this.returnToMenu(); if (next < FL.MISSIONS.length && !FL.MISSIONS[next].sandbox)
                 this.brief(next); });
             element("observe").addEventListener("click", () => this.setScope(!this.scope));
             element("hudAssist").addEventListener("click", () => this.toggleHud("assist"));
@@ -2277,10 +2448,16 @@ var FL;
             text("briefNumber", mission.subtitle);
             text("briefTitle", mission.name);
             text("briefText", mission.briefing);
-            text("briefRounds", `${mission.rounds} HE / ${mission.smoke} SMOKE`);
             text("briefClock", mission.limit ? clock(mission.limit) : "NO TIME LIMIT");
+            this.updateBrief();
             element("menu").hidden = true;
             this.openModal("briefing");
+        }
+        updateBrief() {
+            const mission = FL.MISSIONS[this.pendingMission], weapon = FL.WEAPONS[this.save.settings.weapon] ?? FL.WEAPONS.mortar;
+            text("briefRounds", mission.sandbox ? "UNLIMITED" : `${Math.max(1, Math.round(mission.rounds * weapon.rounds))} HE / ${mission.smoke} SMOKE`);
+            element("pickMortar").setAttribute("aria-pressed", String(weapon.id === "mortar"));
+            element("pickM777").setAttribute("aria-pressed", String(weapon.id === "m777"));
         }
         startMission(id) {
             for (const modal of ["briefing", "pausePanel", "help", "settings", "result"])
@@ -2307,7 +2484,7 @@ var FL;
             this.layoutKey = "";
             this.aiming.reset();
             this.coach.reset();
-            this.sim.start(id);
+            this.sim.start(id, this.save.settings.weapon);
             this.renderer.reset();
             this.coach.update(this.sim, this.assistEnabled, 0, true);
             this.accumulator = 0;
@@ -2390,10 +2567,10 @@ var FL;
             else if (event.type === "shot") {
                 this.clearInput(false);
                 this.hud.dispatch("fire");
-                this.sound.fire();
+                this.sound.fire(this.sim.weapon.id === "m777");
                 this.vibrate([28, 18, 18]);
                 this.recoil = 1;
-                this.shake = this.save.settings.shake ? .07 : 0;
+                this.shake = this.save.settings.shake ? this.sim.weapon.id === "m777" ? .13 : .07 : 0;
                 if (this.save.settings.autoSpot)
                     this.setScope(true);
             }
@@ -2429,7 +2606,7 @@ var FL;
         }
         showResult() {
             const won = this.sim.phase === "won";
-            if (won) {
+            if (won && !this.sim.mission.sandbox) {
                 this.save.best[this.sim.mission.id] = Math.max(this.save.best[this.sim.mission.id], this.sim.stars);
                 this.persist();
                 this.sound.success();
@@ -2443,10 +2620,12 @@ var FL;
             text("statTargets", `${this.sim.kills}/${this.sim.totalTargets}`);
             text("statTime", clock(this.sim.time));
             text("resultTip", won ? this.sim.stars === 3 ? "Clean work. Observation and correction kept ammunition use low." : `For three stars: use ${this.sim.mission.par} HE rounds or fewer and retain at least 75% integrity.` : "Watch the first impact. Lower elevation for more reach; raise it to bring the next shot closer.");
-            element("next").hidden = !won || this.sim.mission.id === FL.MISSIONS.length - 1;
+            element("next").hidden = !won || !FL.MISSIONS[this.sim.mission.id + 1] || FL.MISSIONS[this.sim.mission.id + 1].sandbox === true;
             this.openModal("result");
         }
         updateMissionCards() { for (let i = 0; i < FL.MISSIONS.length; i++) {
+            if (FL.MISSIONS[i].sandbox)
+                continue;
             const available = i === 0 || this.save.best[i - 1] > 0;
             element(`mission${i}`).disabled = !available;
             text(`missionStatus${i}`, this.save.best[i] ? "★".repeat(this.save.best[i]) + "☆".repeat(3 - this.save.best[i]) : available ? "DEPLOY →" : `COMPLETE MISSION 0${i}`);
@@ -2474,10 +2653,11 @@ var FL;
                 if (report.damage === 0 && report.motionError)
                     return report.motionError === "behind" ? "The round landed behind a moving target. Enable the movement aid to see its estimated arrival." : "The round landed ahead of a moving target. Reduce the gap or enable the movement aid.";
                 const hints = [];
+                const highAngle = sim.elevation > 45;
                 if (report.dz < -6)
-                    hints.push("SHORT → lower elevation");
+                    hints.push(highAngle ? "SHORT → lower elevation" : "SHORT → raise elevation");
                 else if (report.dz > 6)
-                    hints.push("LONG → raise elevation");
+                    hints.push(highAngle ? "LONG → raise elevation" : "LONG → lower elevation");
                 if (report.dx < -5)
                     hints.push("LEFT → traverse right");
                 else if (report.dx > 5)
@@ -2491,29 +2671,31 @@ var FL;
                 return "Swipe the shell up, or tap LOAD. Choose HE for damage; SMOKE delays movement.";
             if (this.scope)
                 return "AIM LINKED: drag the battlefield or use the arrows to adjust the next round. LOOK pans the optics.";
-            return "Drag AIM to lay the weapon. Higher elevation brings the impact closer.";
+            return sim.elevation > 45 ? "Drag AIM to lay the weapon. Higher elevation brings the impact closer." : "Drag AIM to lay the weapon. At low angles, higher elevation sends the impact further.";
         }
         updateUI() {
             if (this.menu)
                 return;
             const sim = this.sim;
-            text("missionLabel", `0${sim.mission.id + 1} / ${sim.mission.name.toUpperCase()}`);
+            text("missionLabel", `${sim.mission.sandbox ? "RANGE" : `0${sim.mission.id + 1}`} / ${sim.mission.name.toUpperCase()} / ${sim.weapon.name}`);
             text("objective", sim.mission.task);
-            text("kills", `${sim.kills} / ${sim.totalTargets}`);
+            text("kills", sim.mission.sandbox ? `${sim.kills} DOWN` : `${sim.kills} / ${sim.totalTargets}`);
             text("timer", (sim.mission.limit ? clock(sim.mission.limit - sim.time) : "NO LIMIT") + (this.focus ? " ½×" : ""));
             this.root.dataset.pressure = String(sim.mission.id === 2);
-            text("wind", `${Math.abs(sim.wind()).toFixed(1)} ${sim.wind() >= 0 ? "→" : "←"}`);
+            text("wind", sim.wind() === 0 ? "CALM" : `${Math.abs(sim.wind()).toFixed(1)} ${sim.wind() >= 0 ? "→" : "←"}`);
+            element("windBlock").disabled = !sim.mission.sandbox;
+            text("windLabel", sim.mission.sandbox ? "WIND · TAP" : "WIND");
             text("yaw", `${sim.yaw >= 0 ? "+" : "−"}${Math.abs(sim.yaw).toFixed(1)}°`);
             text("elevation", `${sim.elevation.toFixed(1)}°`);
-            text("heCount", String(sim.inventory.he));
-            text("smokeCount", String(sim.inventory.smoke));
+            text("heCount", sim.mission.sandbox ? "∞" : String(sim.inventory.he));
+            text("smokeCount", sim.mission.sandbox ? "∞" : String(sim.inventory.smoke));
             element("ammoHE").setAttribute("aria-pressed", String(sim.selectedAmmo === "he"));
             element("ammoSmoke").setAttribute("aria-pressed", String(sim.selectedAmmo === "smoke"));
             element("fine").setAttribute("aria-pressed", String(this.isFine()));
             text("fineText", this.fine ? "FINE ON" : this.coach.precision ? "AUTO FINE" : "FINE");
             element("observe").setAttribute("aria-pressed", String(this.scope));
             text("viewText", this.scope ? "WEAPON" : "OBSERVE");
-            text("viewName", this.scope ? `OBSERVER / ${this.aiming.mode === "lay" ? "AIM LINKED" : "LOOK ONLY"}` : "MORTAR POSITION");
+            text("viewName", this.scope ? `OBSERVER / ${this.aiming.mode === "lay" ? "AIM LINKED" : "LOOK ONLY"}` : sim.weapon.position);
             text("zoomValue", `${this.zoom.toFixed(1)}×`);
             element("scopeAim").setAttribute("aria-pressed", String(this.aiming.mode === "lay"));
             element("scopeLook").setAttribute("aria-pressed", String(this.aiming.mode === "look"));
@@ -2582,7 +2764,7 @@ var FL;
             this.root.dataset.practice = active ? "on" : "off";
             this.root.dataset.moving = String(!practice);
             element("practiceCoach").classList.toggle("moving", !practice);
-            text("coachLabel", practice ? "GUIDED PRACTICE / MISSION 01" : "OBSERVER / MOVING TARGETS");
+            text("coachLabel", practice ? "GUIDED PRACTICE / MISSION 01" : this.sim.mission.sandbox ? "TEST RANGE / FREE FIRE" : "OBSERVER / MOVING TARGETS");
             element("practiceToggle").setAttribute("aria-pressed", String(active));
             text("practiceToggle", active ? "AID ON" : "AID OFF");
             element("movingTools").hidden = practice;
@@ -2609,7 +2791,7 @@ var FL;
             for (const [id, axis] of [["coachYaw", "yaw"], ["coachRange", "elevation"]]) {
                 const direction = this.coach.direction(axis), button = element(id);
                 button.disabled = !direction || this.sim.state === "relocating";
-                const delta = Math.abs(advice?.[axis] ?? 0), label = direction === "left" ? "← LEFT" : direction === "right" ? "RIGHT →" : direction === "down" ? "↓ FURTHER" : direction === "up" ? "↑ CLOSER" : axis === "yaw" ? "TRAVERSE OK" : "RANGE OK";
+                const highAngle = this.sim.elevation > 45, delta = Math.abs(advice?.[axis] ?? 0), label = direction === "left" ? "← LEFT" : direction === "right" ? "RIGHT →" : direction === "down" ? highAngle ? "↓ FURTHER" : "↓ CLOSER" : direction === "up" ? highAngle ? "↑ CLOSER" : "↑ FURTHER" : axis === "yaw" ? "TRAVERSE OK" : "RANGE OK";
                 text(id, `${label}${direction ? ` ${delta.toFixed(1)}°` : ""}`);
             }
         }
@@ -2673,6 +2855,18 @@ var FL;
                         ctx.fillRect(x - 18, y + 11, 36 * target.hp / target.maxHp, 2);
                     }
                 }
+            }
+            for (const z of this.scope ? this.sim.mission.boards ?? [] : []) {
+                const point = this.renderer.project(FL.RANGE_BOARD_X, this.sim.terrain.height(FL.RANGE_BOARD_X, z) + 3.6, z);
+                if (!point || Math.abs(point.x) > .98 || Math.abs(point.y) > .88 || point.z > 1)
+                    continue;
+                const x = (point.x * .5 + .5) * w, y = (-point.y * .5 + .5) * h;
+                if (y < 100 || y > h - (w > h ? 120 : 190))
+                    continue;
+                ctx.fillStyle = "rgba(15,24,20,.72)";
+                ctx.fillRect(x - 20, y - 8, 40, 15);
+                ctx.fillStyle = "#e9dcb4";
+                ctx.fillText(`${z} M`, x, y + 3);
             }
             this.drawPracticeMarker(ctx, w, h);
             for (const report of this.sim.impactHistory) {
@@ -2872,7 +3066,7 @@ var FL;
             const blob = new Blob(["<!doctype html>\n" + clone.outerHTML], { type: "text/html" });
             const url = URL.createObjectURL(blob), a = document.createElement("a");
             a.href = url;
-            a.download = "FIRELINE-v0.4.html";
+            a.download = "FIRELINE-v0.5.html";
             document.body.append(a);
             a.click();
             a.remove();

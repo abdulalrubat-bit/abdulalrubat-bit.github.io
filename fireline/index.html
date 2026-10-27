@@ -63,7 +63,7 @@
 </div>
 <section class="hud" aria-label="Weapon controls and mission status">
  <header class="hud-top"><div class="brand"><svg><use href="#i-mark"/></svg>FIRELINE</div><span class="station-type">LIGHT MORTAR / FIELD TRIAL</span><div class="wind-block"><span>WIND</span><strong id="wind">1.4 →</strong></div><div class="hud-tools"><button class="icon-button" id="soundButton" aria-label="Mute sound" aria-pressed="true"><svg><use href="#i-sound"/></svg></button><button class="icon-button desktop-extra" id="fullscreen" aria-label="Fullscreen"><svg><use href="#i-full"/></svg></button><button class="icon-button" id="helpButton" aria-label="How to play"><svg><use href="#i-help"/></svg></button><button class="icon-button desktop-extra" id="settingsButton" aria-label="Settings"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="pause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button></div></header>
- <div class="objective-row"><div class="objective-card"><div class="eyebrow" id="missionLabel">01 / THE ORCHARD</div><p id="objective">Destroy the fortified position</p></div><div class="mission-stats"><div id="integrityBlock" hidden>INTEGRITY<strong id="integrity">100%</strong></div><div>TARGETS<strong id="kills">0 / 1</strong></div><div class="wide">FIRING WINDOW<strong id="timer">OPEN WINDOW</strong></div></div></div>
+ <div class="objective-row"><div class="objective-card"><div class="eyebrow" id="missionLabel">01 / THE ORCHARD</div><p id="objective">Destroy the fortified position</p></div><div class="mission-stats"><div id="integrityBlock" hidden>INTEGRITY<strong id="integrity">100%</strong></div><div>TARGETS<strong id="kills">0 / 1</strong></div><div class="wide">FIRING WINDOW<strong id="timer">NO LIMIT</strong></div></div></div>
  <div class="field-status" id="fieldStatus" hidden>
   <div class="flight" id="flight" hidden><i></i><span id="flightCount">1 IN FLIGHT</span><strong id="flightTime">5.5s</strong></div>
   <div class="report" id="report" hidden role="status"><strong id="reportText">IMPACT OBSERVED</strong></div>
@@ -108,6 +108,9 @@
 </main>
 <script id="firelineEngine">"use strict";
 var FL;
+(function (FL) {
+    FL.PRISTINE = document.documentElement.cloneNode(true);
+})(FL || (FL = {}));
 (function (FL) {
     FL.DEG = Math.PI / 180;
     FL.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -646,7 +649,7 @@ var FL;
                     this.incoming -= step;
                     if (this.incoming <= 0) {
                         this.incoming = 0;
-                        this.exposure = 25;
+                        this.exposure = Math.min(this.exposure, 25);
                         if (FL.distance(this.originX, this.originZ, this.incomingX, this.incomingZ) < 16) {
                             this.integrity = Math.max(0, this.integrity - 38);
                             this.bus.emit({ type: "damage", amount: 38, x: this.incomingX, z: this.incomingZ });
@@ -689,11 +692,8 @@ var FL;
                             this.kills++;
                         }
                     }
-                    else if (d < 34 && this.mission.id !== 1) {
+                    else if (d < 34 && this.mission.id !== 1)
                         target.suppressed = 2;
-                        if (target.kind === "truck" && target.route)
-                            target.speed = Math.min(3, target.speed + 0.18);
-                    }
                 }
                 if (damage > 0)
                     this.hits++;
@@ -1304,7 +1304,9 @@ void main(){vec4 p=uVP*vec4(aPosition,1.);gl_Position=p;gl_PointSize=clamp(aSize
             gl.uniform1f(this.uniforms.uOverlay, 1);
             gl.uniform3f(this.uniforms.uEye, 0, 0, 0);
             const sway = Math.sin(now * .8) * .007, recoil = state.recoil * .16, relocate = sim.state === "relocating" ? Math.sin(sim.time * 8) * .10 - .4 : 0;
-            const bx = sway - .12, by = -1.24 - recoil + relocate, bz = 2.0, tilt = (90 - sim.elevation) * FL.DEG, yaw = sim.yaw * FL.DEG * .45;
+            // Narrow portrait views set the weapon further back so it does not cover the aim point.
+            const narrow = FL.clamp((1 - this.width / this.height) / .55, 0, 1);
+            const bx = sway - .12, by = -1.24 - narrow * .3 - recoil + relocate, bz = 2.0 + narrow * 1.1, tilt = (90 - sim.elevation) * FL.DEG, yaw = sim.yaw * FL.DEG * .45;
             const olive = [.34, .39, .26], dark = [.13, .16, .13], metal = [.46, .47, .36];
             this.draw("cylinder", bx, by - .06, bz, .64, .065, .64, dark);
             this.draw("box", bx, by - .10, bz, 1.35, .09, 1.0, olive, .16);
@@ -2498,7 +2500,7 @@ var FL;
             text("missionLabel", `0${sim.mission.id + 1} / ${sim.mission.name.toUpperCase()}`);
             text("objective", sim.mission.task);
             text("kills", `${sim.kills} / ${sim.totalTargets}`);
-            text("timer", (sim.mission.limit ? clock(sim.mission.limit - sim.time) : "OPEN WINDOW") + (this.focus ? " ½×" : ""));
+            text("timer", (sim.mission.limit ? clock(sim.mission.limit - sim.time) : "NO LIMIT") + (this.focus ? " ½×" : ""));
             this.root.dataset.pressure = String(sim.mission.id === 2);
             text("wind", `${Math.abs(sim.wind()).toFixed(1)} ${sim.wind() >= 0 ? "→" : "←"}`);
             text("yaw", `${sim.yaw >= 0 ? "+" : "−"}${Math.abs(sim.yaw).toFixed(1)}°`);
@@ -2845,7 +2847,8 @@ var FL;
             requestAnimationFrame((time) => this.frame(time));
         }
         download() {
-            const clone = document.documentElement.cloneNode(true);
+            // Start from the page as first loaded so live HUD text and progress are not baked in.
+            const clone = FL.PRISTINE.cloneNode(true);
             for (const script of clone.querySelectorAll("script"))
                 if (script.id !== "firelineEngine")
                     script.remove();
